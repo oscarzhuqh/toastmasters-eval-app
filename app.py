@@ -30,7 +30,7 @@ pathway = st.selectbox(
 pathway_level = st.selectbox(
     "TPathway Level",
     [
-        "1,
+        "1",
         "2",
         "3",
         "4",
