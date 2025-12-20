@@ -29,7 +29,7 @@ pathway = st.selectbox(
 )
 
 pathway_level = st.selectbox(
-    "TPathway Level",
+    "Pathway Level",
     [
         "---Please Select from this drop-down list--",
         "1",
