@@ -1,34 +1,39 @@
 import streamlit as st
+import requests
 
-st.title("Toastmasters Evaluation Assistant (Test)")
+st.title("Toastmasters Evaluation Assistant")
 
-notes = st.text_area("Paste evaluator notes", height=200)
+notes = st.text_area("Paste evaluator notes")
+length = st.selectbox("Evaluation length", ["1 minute", "2 minutes", "3 minutes"])
 
-length = st.selectbox(
-    "Select evaluation length",
-    ["1 minute", "2 minutes", "3 minutes"]
-)
+FLOWISE_URL = "http://localhost:3000/api/v1/prediction/YOUR_CHATFLOW_ID"
 
-st.write(f"Selected evaluation length: {length}")
-
-if st.button("Generate"):
+if st.button("Generate Evaluation"):
     if not notes.strip():
         st.warning("Please enter some notes.")
     else:
-        st.success("Notes received successfully.")
+        payload = {
+            "question": f"""
+Evaluator notes:
+{notes}
 
-        st.subheader("Evaluator Notes (Raw)")
-        st.text(notes)
+Evaluation length: {length}
 
-        st.subheader("Structured Preview (Manual)")
-        st.markdown("""
-**Strengths:**
-- Good energy
-- Nice structure
-- Eye contact mostly good
+Generate a structured Toastmasters evaluation with:
+- Opening
+- Commendations
+- Recommendations
+- Encouraging close
 
-**Areas for Improvement:**
-- Organise ideas more clearly
-- Practise smoother transitions
-- End with a clear conclusion
-""")
+Use only the notes provided.
+"""
+        }
+
+        response = requests.post(FLOWISE_URL, json=payload)
+
+        if response.status_code == 200:
+            result = response.json()
+            st.subheader("Generated Evaluation")
+            st.write(result["text"])
+        else:
+            st.error("Flowise request failed.")
