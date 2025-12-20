@@ -13,6 +13,7 @@ evaluator_name = st.text_input("Evaluator Name")
 pathway = st.selectbox(
     "Toastmasters Pathways",
     [
+        "---Please Select from this drop-down list--",
         "Dynamic Leadership",
         "Engaging Humor",
         "Motivational Strategies",
@@ -30,6 +31,7 @@ pathway = st.selectbox(
 pathway_level = st.selectbox(
     "TPathway Level",
     [
+        "---Please Select from this drop-down list--",
         "1",
         "2",
         "3",
