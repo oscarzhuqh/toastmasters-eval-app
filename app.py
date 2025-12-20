@@ -1,5 +1,6 @@
 import streamlit as st
 
+st.image("toastmasters_logo.png", width=200)
 st.title("Toastmasters Evaluation Assistant (Test)")
 
 # Input fields
