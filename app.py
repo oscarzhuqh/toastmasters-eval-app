@@ -1,9 +1,6 @@
 import streamlit as st
 from datetime import date
 
-# -----------------------
-# Page config
-# -----------------------
 st.set_page_config(
     page_title="Toastmasters Evaluation Assistant (TEA)",
     page_icon="🗣️",
@@ -43,6 +40,11 @@ with st.container():
                 "Persuasive Influence",
                 "Presentation Mastery",
                 "Visionary Communication",
+                "Effective Coaching",
+                "Innovative Planning",
+                "Leadership Development",
+                "Strategic Relationships",
+                "Team Collaboration"
             ],
             index=0
         )
@@ -94,6 +96,73 @@ with cC:
 st.divider()
 
 # -----------------------
+# Helpers
+# -----------------------
+def opening_text(length: str, tone_style: str) -> str:
+    if length == "1 minute":
+        base = "Thank you for your speech today. I appreciate the effort you put into sharing your message."
+    elif length == "2 minutes":
+        base = "Thank you for your speech today. I appreciate the effort you put into preparing and delivering your message to the audience."
+    else:
+        base = "Thank you for your speech today. I enjoyed listening to your presentation and appreciate the effort you put into preparing and delivering your message."
+
+    if tone_style == "Professional Mentor":
+        return base.replace("I appreciate", "I recognise").replace("your message", "your purpose and message")
+    if tone_style == "Neutral/Contest-Style":
+        return "Thank you for your speech. Here is your evaluation based on observable criteria."
+    return base
+
+def closing_text(length: str, tone_style: str) -> str:
+    if length == "1 minute":
+        base = "Overall, this was a good effort, and I encourage you to keep practising."
+    elif length == "2 minutes":
+        base = "Overall, this was a solid speech with a strong foundation. With continued practice, your speeches will become even more impactful."
+    else:
+        base = "Overall, this was a strong speech with good potential. With more focus on refining your delivery and engaging the audience, your future speeches will continue to improve."
+
+    if tone_style == "Professional Mentor":
+        return base.replace("good potential", "strong potential").replace("keep practising", "keep refining your craft")
+    if tone_style == "Neutral/Contest-Style":
+        return "Overall, your speech met the general requirements. Continued refinement will improve impact and polish."
+    return base
+
+def pick_strengths_and_improvements(data: dict):
+    strengths, improvements = [], []
+    for item in data.values():
+        rt = int(item["rating"])
+        if rt >= 4:
+            strengths.append(item)
+        else:
+            improvements.append(item)
+    strengths.sort(key=lambda x: x["rating"], reverse=True)
+    improvements.sort(key=lambda x: x["rating"])
+    return strengths, improvements
+
+def one_line_point(item: dict, kind: str) -> str:
+    title = item["title"]
+    comment = item["comment"]
+    if comment:
+        if kind == "strength":
+            return f"Your {title} stood out — {comment}"
+        return f"For {title}, consider improving — {comment}"
+    return f"{'Your ' + title + ' was a strength.' if kind == 'strength' else 'One area to improve is ' + title + '.'}"
+
+def default_bullets(items: list, kind: str, limit: int):
+    if not items:
+        return ""
+    lines = []
+    for it in items[:limit]:
+        lines.append(f"- {one_line_point(it, kind)}")
+    return "\n".join(lines)
+
+def ensure_state(key: str, value: str):
+    if key not in st.session_state:
+        st.session_state[key] = value
+
+def safe_md(text: str) -> str:
+    return text.strip() if text and text.strip() else "- (No input provided.)"
+
+# -----------------------
 # Rubric scoring UI
 # -----------------------
 st.subheader("Rubric Scoring (1–5) + Comments")
@@ -131,65 +200,48 @@ for r in RUBRICS:
 st.divider()
 
 # -----------------------
-# Optional raw notes (keep for backward compatibility)
+# General Comments (replace raw notes)
 # -----------------------
-with st.expander("Optional: Paste raw evaluator notes (if you have them)", expanded=False):
-    notes = st.text_area("Paste evaluator notes", height=160, placeholder="You can leave this empty if you used the rubric above.")
-    st.caption("This is optional. The rubric scores + comments are the primary inputs.")
+st.subheader("General Comments")
+st.caption("These boxes auto-fill from your rubric selections. Edit freely.")
 
-# -----------------------
-# Helper: build text by length + tone
-# -----------------------
-def opening_text(length: str, tone_style: str) -> str:
-    if length == "1 minute":
-        base = "Thank you for your speech today. I appreciate the effort you put into sharing your message."
-    elif length == "2 minutes":
-        base = "Thank you for your speech today. I appreciate the effort you put into preparing and delivering your message to the audience."
+if evaluation_length == "1 minute":
+    max_strengths, max_improve = 1, 1
+elif evaluation_length == "2 minutes":
+    max_strengths, max_improve = 2, 2
+else:
+    max_strengths, max_improve = 3, 2
+
+strengths_now, improvements_now = pick_strengths_and_improvements(rubric_data) if rubric_data else ([], [])
+suggest_excelled = default_bullets(strengths_now, "strength", max_strengths)
+suggest_workon = default_bullets(improvements_now, "improve", max_improve)
+
+if improvements_now:
+    ch = improvements_now[0]
+    suggest_challenge = f"- To challenge yourself, focus on **{ch['title']}** next time. Practise one specific drill and measure improvement."
+else:
+    selected_titles = [r["title"] for r in RUBRICS if r["title"] in focus]
+    if selected_titles:
+        suggest_challenge = f"- To challenge yourself, choose one focus area next time: **{selected_titles[0]}**."
     else:
-        base = "Thank you for your speech today. I enjoyed listening to your presentation and appreciate the effort you put into preparing and delivering your message."
+        suggest_challenge = "- To challenge yourself, pick one key focus area for your next speech."
 
-    if tone_style == "Professional Mentor":
-        return base.replace("I appreciate", "I recognise").replace("your message", "your purpose and message")
-    if tone_style == "Neutral/Contest-Style":
-        return "Thank you for your speech. Here is your evaluation based on observable criteria."
-    return base
+ensure_state("gc_excelled", suggest_excelled)
+ensure_state("gc_workon", suggest_workon)
+ensure_state("gc_challenge", suggest_challenge)
 
-def closing_text(length: str, tone_style: str) -> str:
-    if length == "1 minute":
-        base = "Overall, this was a good effort, and I encourage you to keep practising."
-    elif length == "2 minutes":
-        base = "Overall, this was a solid speech with a strong foundation. With continued practice, your speeches will become even more impactful."
-    else:
-        base = "Overall, this was a strong speech with good potential. With more focus on refining your delivery and engaging the audience, your future speeches will continue to improve."
+cX, _ = st.columns([1, 3])
+with cX:
+    if st.button("Auto-fill from rubric"):
+        st.session_state["gc_excelled"] = suggest_excelled
+        st.session_state["gc_workon"] = suggest_workon
+        st.session_state["gc_challenge"] = suggest_challenge
 
-    if tone_style == "Professional Mentor":
-        return base.replace("good potential", "strong potential").replace("keep practising", "keep refining your craft")
-    if tone_style == "Neutral/Contest-Style":
-        return "Overall, your speech met the general requirements. Continued refinement will improve impact and polish."
-    return base
+excelled_at = st.text_area("You excelled at:", key="gc_excelled", height=110, placeholder="- Clarity\n- Eye contact\n- Vocal variety")
+work_on = st.text_area("You may want to work on:", key="gc_workon", height=110, placeholder="- One key improvement\n- One practice tip")
+challenge_yourself = st.text_area("To challenge yourself:", key="gc_challenge", height=90, placeholder="- One stretch goal for the next speech")
 
-def pick_strengths_and_improvements(data: dict):
-    strengths, improvements = [], []
-    # Strength: 4–5, Improvement: 1–3
-    for item in data.values():
-        rt = int(item["rating"])
-        if rt >= 4:
-            strengths.append(item)
-        else:
-            improvements.append(item)
-
-    strengths.sort(key=lambda x: x["rating"], reverse=True)
-    improvements.sort(key=lambda x: x["rating"])
-    return strengths, improvements
-
-def one_line_point(item: dict, kind: str) -> str:
-    title = item["title"]
-    comment = item["comment"]
-    if comment:
-        if kind == "strength":
-            return f"Your **{title}** stood out — {comment}"
-        return f"For **{title}**, consider improving — {comment}"
-    return f"{'Your **' + title + '** was a strength.' if kind == 'strength' else 'One area to improve is **' + title + '**.'}"
+st.divider()
 
 # -----------------------
 # Generate Evaluation
@@ -200,13 +252,6 @@ if st.button("Generate Evaluation"):
         st.stop()
 
     strengths, improvements = pick_strengths_and_improvements(rubric_data)
-
-    if evaluation_length == "1 minute":
-        max_strengths, max_improve = 1, 1
-    elif evaluation_length == "2 minutes":
-        max_strengths, max_improve = 2, 2
-    else:
-        max_strengths, max_improve = 3, 2
 
     st.subheader("Rubric Summary")
     summary_rows = []
@@ -239,23 +284,18 @@ Thank you, **{speaker_disp}**, for your speech{f" titled *{title_disp}*" if titl
 {opening_text(evaluation_length, tone)}
 """)
 
-    st.markdown("### Commendations")
-    if strengths:
-        for s in strengths[:max_strengths]:
-            st.write(f"- {one_line_point(s, 'strength')}")
-    else:
-        st.write("- You demonstrated good effort and confidence during your speech.")
+    excelled_text = safe_md(excelled_at) if excelled_at.strip() else (default_bullets(strengths, "strength", max_strengths) or "- You demonstrated good effort and confidence.")
+    workon_text = safe_md(work_on) if work_on.strip() else (default_bullets(improvements, "improve", max_improve) or "- Continue refining your delivery and audience engagement.")
+    challenge_text = safe_md(challenge_yourself) if challenge_yourself.strip() else safe_md(suggest_challenge)
 
-    st.markdown("### Areas for Improvement")
-    if improvements:
-        for i in improvements[:max_improve]:
-            st.write(f"- {one_line_point(i, 'improve')}")
-    else:
-        st.write("- Continue refining your delivery and audience engagement.")
+    st.markdown("### You excelled at:")
+    st.markdown(excelled_text)
 
-    if notes.strip():
-        st.markdown("### Notes You Captured (Optional)")
-        st.write(notes.strip())
+    st.markdown("### You may want to work on:")
+    st.markdown(workon_text)
+
+    st.markdown("### To challenge yourself:")
+    st.markdown(challenge_text)
 
     st.markdown(f"""
 ### Encouraging Close
@@ -272,19 +312,14 @@ Thank you, **{speaker_disp}**, for your speech{f" titled *{title_disp}*" if titl
             lines.append(pathway_line.replace("**", ""))
         lines.append(opening_text(evaluation_length, tone))
         lines.append("")
-        lines.append("COMMENDATIONS:")
-        if strengths:
-            for s in strengths[:max_strengths]:
-                lines.append(f"- {one_line_point(s, 'strength').replace('**','')}")
-        else:
-            lines.append("- Good effort and confidence.")
+        lines.append("YOU EXCELLED AT:")
+        lines.append(excelled_text.replace("**", ""))
         lines.append("")
-        lines.append("AREAS FOR IMPROVEMENT:")
-        if improvements:
-            for i in improvements[:max_improve]:
-                lines.append(f"- {one_line_point(i, 'improve').replace('**','')}")
-        else:
-            lines.append("- Continue refining delivery and engagement.")
+        lines.append("YOU MAY WANT TO WORK ON:")
+        lines.append(workon_text.replace("**", ""))
+        lines.append("")
+        lines.append("TO CHALLENGE YOURSELF:")
+        lines.append(challenge_text.replace("**", ""))
         lines.append("")
         lines.append("CLOSE:")
         lines.append(closing_text(evaluation_length, tone))
