@@ -43,11 +43,6 @@ with st.container():
                 "Persuasive Influence",
                 "Presentation Mastery",
                 "Visionary Communication",
-                "Effective Coaching",
-                "Innovative Planning",
-                "Leadership Development",
-                "Strategic Relationships",
-                "Team Collaboration"
             ],
             index=0
         )
