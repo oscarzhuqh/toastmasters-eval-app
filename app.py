@@ -302,7 +302,7 @@ with h1:
 with h2:
     st.markdown("# Toastmasters Evaluation Application")
     st.caption("T.E.A. — Toastmasters Evaluation Assistant")
-    st.caption("NYP ITI123 Appplication Development Project: Zhu Qihui, Oscar, StudentID: 9801937V")
+    st.caption("NYP ITI123 Appplication Development Project by Zhu Qihui, Oscar 9801937V")
 
 st.divider()
 
