@@ -32,11 +32,6 @@ notes: "Personal knowledge base. Written in my own words."
 - **Purpose**: The member will deliver a well-organized speech on any topic and incorporate feedback from their previous speech evaluation. The member may choose to present the same speech, a revision of their first Evaluation and Feedback speech, or a new speech.
 - **Speech length**: 5–7 minutes
 
-### Project: Introduction to Vocal Variety and Body Language
-- **Type:** Required
-- **Purpose**: The purpose of this project is for the member to practice using vocal variety or body language to enhance a speech.
-- **Speech length**: 5–7 minutes
-
 ### Project: Writing a Speech with Purpose
 - **Type:** Required
 - **Purpose**: The purpose of this project is to learn or review basic methods for writing a speech with a defined purpose and to present a well-organized speech on any topic.
