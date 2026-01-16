@@ -14,5 +14,5 @@ notes: "Personal knowledge base. Written in my own words."
 
 ### Project: Ice Breaker
 - **Type:** Required
-- **Purpose:** Introduce yourself to the club and practise organising a basic public speech.
-- **Speech length (optional):** 4–6 minutes
+- **Purpose** : Introduce yourself to the club and practise organising a basic public speech.
+- **Speech length (optional)** : 4–6 minutes
