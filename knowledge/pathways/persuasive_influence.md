@@ -1,13 +1,13 @@
 ---
-title: "Presentation Mastery — Knowledge Base"
+title: "Persuasive Influence— Knowledge Base"
 doc_type: "pathways_knowledge_base"
-pathway: "Presentation Mastery"
+pathway: "Persuasive Influence"
 version: "1.0"
 last_updated: "2026-01-16"
 notes: "Personal knowledge base. Written in my own words."
 ---
 
-# Pathway: Presentation Mastery
+# Pathway: Persuasive Influence
 
 ## Level 1
 **Level focus:** "Mastering Fundamentals," trains members in the foundational skills of public speaking, speech writing, evaluation, and providing feedback.
