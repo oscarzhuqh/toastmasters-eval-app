@@ -3,7 +3,7 @@ from pathlib import Path
 import re
 
 # ✅ Change this to your actual .md file
-MD_PATH = Path("knowledge/pathways/presentation_mastery.md")
+MD_PATH = Path(__file__).parent / "knowledge" / "pathways" / "presentation_mastery.md"
 
 def extract_purpose(md_path: Path, level: str, project: str) -> str:
     if not md_path.exists():
