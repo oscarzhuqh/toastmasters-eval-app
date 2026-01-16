@@ -1,6 +1,71 @@
-import os
+# crewai_eval.py
+from __future__ import annotations
 
-from crewai import Agent, Task, Crew
+import os
+from typing import Optional
+
+# CrewAI imports (works for most CrewAI versions)
+from crewai import Agent, Task, Crew, Process
+
+
+def _get_api_key() -> Optional[str]:
+    """
+    Tries (in order):
+      1) Streamlit secrets (if running inside Streamlit Cloud)
+      2) Environment variable OPENAI_API_KEY
+    """
+    # Streamlit secrets (optional)
+    try:
+        import streamlit as st  # type: ignore
+        if hasattr(st, "secrets") and "OPENAI_API_KEY" in st.secrets:
+            return str(st.secrets["OPENAI_API_KEY"]).strip()
+    except Exception:
+        pass
+
+    # Env var
+    key = os.getenv("OPENAI_API_KEY", "").strip()
+    return key or None
+
+
+def _make_llm():
+    """
+    Creates an LLM object compatible with CrewAI.
+
+    Works across common setups:
+      - If your CrewAI supports `crewai.LLM`, use it.
+      - Otherwise, let CrewAI use the provider/model via env vars.
+
+    Recommended env vars:
+      OPENAI_API_KEY
+      OPENAI_MODEL (optional, default below)
+    """
+    api_key = _get_api_key()
+    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
+
+    # Newer CrewAI versions expose an LLM helper
+    try:
+        from crewai import LLM  # type: ignore
+
+        if not api_key:
+            raise RuntimeError(
+                "OPENAI_API_KEY not found. Set it in Streamlit Secrets or environment variables."
+            )
+
+        return LLM(
+            model=model,
+            api_key=api_key,
+        )
+    except Exception:
+        # Fallback: return a dict-like config that many setups accept, or None.
+        # CrewAI may read OPENAI_API_KEY directly from env, so this can still work.
+        if not api_key:
+            raise RuntimeError(
+                "OPENAI_API_KEY not found. Set it in Streamlit Secrets or environment variables."
+            )
+        os.environ["OPENAI_API_KEY"] = api_key
+        os.environ["OPENAI_MODEL"] = model
+        return None
+
 
 def run_crewai_eval(
     *,
@@ -13,83 +78,31 @@ def run_crewai_eval(
     speech_len: str,
 ) -> str:
     """
-    Retrieval = your markdown extraction (level_focus/purpose/speech_len)
-    Generation = CrewAI turns your notes into a structured evaluation draft
-    """
+    Returns a structured Toastmasters evaluation draft in Markdown.
+    Uses evaluator notes + KB fields (purpose, level_focus, etc.) as context.
 
-    # Expect API key to be set via Streamlit Secrets or env var
-    if not os.getenv("OPENAI_API_KEY"):
-        return (
-            "OPENAI_API_KEY not set.\n\n"
-            "Fix: In Streamlit Cloud -> App -> Settings -> Secrets, add:\n"
-            'OPENAI_API_KEY="your_key_here"'
-        )
+    Your Streamlit app should pass:
+      - notes (includes rubric summary + your general comments)
+      - pathway, level, project, level_focus, purpose, speech_len
+    """
+    llm = _make_llm()
 
     context = f"""
-Pathway: {pathway}
-Level: {level}
-Project: {project}
+Toastmasters context (from knowledge base):
+- Pathway: {pathway}
+- Level: {level}
+- Project: {project}
+- Level focus: {level_focus}
+- Purpose: {purpose}
+- Speech length: {speech_len}
 
-Level focus:
-{level_focus}
-
-Project purpose:
-{purpose}
-
-Speech length:
-{speech_len}
-
-Evaluator raw notes (do not invent facts):
+Evaluator input (do NOT invent extra observations beyond these notes):
 {notes}
 """.strip()
 
-    drafting_agent = Agent(
-        role="Toastmasters Evaluation Drafting Assistant",
-        goal="Write a supportive, structured Toastmasters evaluation aligned to the selected project purpose.",
-        backstory="You are experienced in Toastmasters evaluations and write concise, actionable feedback.",
-        allow_delegation=False,
-    )
+    # -------------------- AGENTS --------------------
+    draft_agent = Agent(
+        role="Toastmasters Evaluation Drafter",
+        goal=(
+            "Draft
 
-    qa_agent = Agent(
-        role="Evaluation Quality Checker",
-        goal="Ensure the evaluation is aligned to purpose and does not add facts not in the notes.",
-        backstory="You check for clarity, fairness, and actionable recommendations.",
-        allow_delegation=False,
-    )
-
-    draft_task = Task(
-        description=(
-            "Using ONLY the provided context + evaluator notes, write a structured evaluation in markdown:\n"
-            "1) Commendations (2–3 bullets, specific)\n"
-            "2) Recommendations (2–3 bullets, actionable + kind)\n"
-            "3) Next time plan (1 sentence)\n"
-            "4) Encouraging close (1 sentence)\n\n"
-            "Rules:\n"
-            "- Do NOT invent content that isn't in the notes.\n"
-            "- Keep it concise and practical.\n\n"
-            f"CONTEXT:\n{context}"
-        ),
-        expected_output="A clean evaluation draft in markdown.",
-        agent=drafting_agent,
-    )
-
-    qa_task = Task(
-        description=(
-            "Review the draft and produce:\n"
-            "A) Alignment check (3 bullets): purpose covered? notes respected? actionable?\n"
-            "B) Final draft (revise only if needed; otherwise repeat draft unchanged)\n\n"
-            "Rules:\n"
-            "- Do NOT add new facts beyond the notes.\n"
-        ),
-        expected_output="Alignment check + final evaluation draft in markdown.",
-        agent=qa_agent,
-    )
-
-    crew = Crew(
-        agents=[drafting_agent, qa_agent],
-        tasks=[draft_task, qa_task],
-        verbose=False,
-    )
-
-    result = crew.kickoff()
-    return getattr(result, "raw", str(result))
