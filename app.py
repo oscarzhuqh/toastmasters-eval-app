@@ -306,15 +306,15 @@ with h2:
 
 st.divider()
 
-# Meeting details
-st.subheader("Meeting Details")
+# Chapter Meeting details
+st.subheader("Chapter Meeting Details")
 c1, c2, c3 = st.columns(3)
 with c1:
-    speaker_name = st.text_input("Speaker Name", placeholder="e.g., Lee Ching Yuh")
+    speaker_name = st.text_input("Speaker Name", placeholder="e.g., Oscar Zhu")
 with c2:
-    evaluator_name = st.text_input("Evaluator Name", placeholder="e.g., Oscar Zhu")
+    evaluator_name = st.text_input("Evaluator Name", placeholder="e.g., Lee Ching Yuh")
 with c3:
-    meeting_date = st.date_input("Date of Meeting")
+    meeting_date = st.date_input("Date of Chapter Meeting")
 
 st.divider()
 
