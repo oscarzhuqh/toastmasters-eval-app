@@ -26,9 +26,9 @@ LOGO_CANDIDATES = [
     APP_DIR / "assets" / "logo.png",
 ]
 
-# -------------------- EVALUATION CRITERIA (ICE BREAKER) --------------------
+# -------------------- SPEECH EVALUATION CRITERIA (TOASTMASTERS INTERNATIONAL) -------------------------------
 # Matches your screenshot, including "Well Supported"
-ICE_BREAKER_CRITERIA: Dict[str, Dict[int, str]] = {
+SPEECH EVALUATION_CRITERIA: Dict[str, Dict[int, str]] = {
     "Clarity": {
         5: "Is an exemplary public speaker who is always understood.",
         4: "Excels at communicating using the spoken word.",
@@ -251,7 +251,7 @@ def render_rubric_table(rubric_def: List[Tuple[str, str]]) -> List[Dict]:
                 rating = st.radio(
                     label=f"{name} rating",
                     options=[5, 4, 3, 2, 1],
-                    index=1,  # default 4
+                    index=2,  # default 3
                     horizontal=True,
                     label_visibility="collapsed",
                     key=f"rubric_rating_{name}",
