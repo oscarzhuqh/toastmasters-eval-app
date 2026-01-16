@@ -16,7 +16,6 @@ PATHWAY_FILES = {
 
 LEVELS = ["Level 1", "Level 2"]
 
-# Example project lists (you can edit anytime)
 LEVEL_PROJECTS = {
     "Level 1": [
         "Ice Breaker",
@@ -31,27 +30,12 @@ LEVEL_PROJECTS = {
         "Understanding Your Leadership Style",
         "Understanding Your Communication Style",
         "Active Listening",
-         "Managing Time",
-    ],
-    "Level 3": [
-        "Persuasive Speaking",
-        "Connect with Storytelling",
-        "Deliver Social Speeches",
-        "Using Presentation Software",
-    ],
-    "Level 4": [
-        "Manage Online Meetings",
-        "Public Relations Strategies",
-    ],
-    "Level 5": [
-        "High Performance Leadership",
-        "Prepare to Speak Professionally",
+        "Managing Time",
     ],
 }
 
 # -------------------- PARSERS --------------------
 def extract_level_block(md_path: Path, level: str) -> str | None:
-    """Return the full markdown block for a given level heading like '## Level 2'."""
     if not md_path.exists():
         return None
 
@@ -66,12 +50,10 @@ def extract_level_block(md_path: Path, level: str) -> str | None:
     return "\n".join(lines[level_start:level_end])
 
 def extract_level_focus(level_block: str) -> str | None:
-    # Supports: **Level focus (your words):** text (colon inside/outside bold, spaces ok)
     m = re.search(r"\*\*Level focus.*?\*\*\s*:?\s*(.+)", level_block, flags=re.IGNORECASE)
     return m.group(1).strip() if m else None
 
 def extract_project_block(level_block: str, project: str) -> str | None:
-    """Return the project section under a given level block."""
     lines = level_block.splitlines()
     project_header = f"### Project: {project}"
 
@@ -86,14 +68,6 @@ def extract_project_block(level_block: str, project: str) -> str | None:
     return "\n".join(lines[proj_start:proj_end])
 
 def extract_field(proj_block: str, field_name: str) -> str | None:
-    """
-    Supports lines like:
-      - **Purpose**: text
-      - **Purpose:** text
-      - **Speech length (optional)**: text
-      - **Speech length**: text
-    (colon can be inside/outside bold; spaces around colon ok)
-    """
     pattern = rf"-\s*\*\*{re.escape(field_name)}.*?\*\*?\s*:?\s*(.+)"
     m = re.search(pattern, proj_block, flags=re.IGNORECASE)
     return m.group(1).strip() if m else None
@@ -106,15 +80,10 @@ st.title("Toastmasters Project Details")
 pathway = st.selectbox("Select Pathway", list(PATHWAY_FILES.keys()))
 level = st.selectbox("Select Level", LEVELS)
 
-# ✅ Project dropdown changes with Level
+# ✅ Project dropdown changes with Level (based on your hardcoded list)
 project_options = LEVEL_PROJECTS.get(level, [])
 if not project_options:
     st.warning(f"No project list configured for {level}. Add it in LEVEL_PROJECTS.")
-  available = re.findall(r"^###\s*Project:\s*(.+)\s*$", level_block, flags=re.IGNORECASE | re.MULTILINE)
-if available:
-    st.caption("Projects found in this pathway + level:")
-    st.write(available)
-
     st.stop()
 
 project = st.selectbox("Select Project", project_options, key=f"project_{level}")
@@ -128,19 +97,30 @@ if st.button("Get Details"):
 
     level_block = extract_level_block(md_path, level)
     if not level_block:
-        st.error(f"Level '{level}' not found in {md_path.name}.")
+        st.error(f"❌ Level '{level}' not found in {md_path.name}.")
         st.info("Fix: Add a heading like `## Level 2` into the markdown file.")
         st.stop()
 
     proj_block = extract_project_block(level_block, project)
     if not proj_block:
-        st.error(f"Project '{project}' not found under {level} in {md_path.name}.")
-        st.info(f"Fix: Ensure your markdown has exactly: `### Project: {project}`")
+        st.error(
+            f"❌ '{project}' was not found under {level} for the '{pathway}' pathway.\n\n"
+            "This usually means the project belongs to a different pathway, or your markdown file "
+            "doesn’t contain it yet.\n\n"
+            "✅ Please select the correct pathway OR add this project into the pathway markdown file."
+        )
+
+        # Show what projects ARE actually inside this pathway+level markdown
+        available = re.findall(r"^###\s*Project:\s*(.+)\s*$", level_block, flags=re.IGNORECASE | re.MULTILINE)
+        if available:
+            st.caption("Projects found in this pathway + level:")
+            st.write(available)
+
+        st.info(f"Expected heading format in {md_path.name}:\n### Project: {project}")
         st.stop()
 
     level_focus = extract_level_focus(level_block) or "Not found"
     purpose = extract_field(proj_block, "Purpose") or "Not found"
-
     speech_len = (
         extract_field(proj_block, "Speech length (optional)")
         or extract_field(proj_block, "Speech length")
@@ -165,5 +145,3 @@ if st.button("Get Details"):
         st.write(speech_len)
 
 st.caption(f"Using file: {md_path}")
-
-
