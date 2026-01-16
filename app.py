@@ -25,6 +25,31 @@ LOGO_CANDIDATES = [
     Path(__file__).parent / "assets" / "TEA TM Logo.png",
 ]
 
+# -------------------- HELPERS --------------------
+def build_rubric_summary(rubric_items: list[dict]) -> tuple[str, str]:
+    """
+    Rule:
+      4–5 -> Strengths
+      1–3 -> Areas for improvement
+    """
+    strengths = []
+    improvements = []
+    for item in rubric_items:
+        name = item["name"]
+        rating = int(item["rating"])
+        comment = (item.get("comment") or "").strip()
+
+        line = f"- {name} ({rating}/5): {comment}" if comment else f"- {name} ({rating}/5)"
+        if rating >= 4:
+            strengths.append(line)
+        else:
+            improvements.append(line)
+
+    strengths_text = "\n".join(strengths) if strengths else "- (none selected)"
+    improvements_text = "\n".join(improvements) if improvements else "- (none selected)"
+    return strengths_text, improvements_text
+
+
 # -------------------- PARSERS --------------------
 def extract_level_block(md_path: Path, level: str) -> str | None:
     if not md_path.exists():
@@ -42,15 +67,18 @@ def extract_level_block(md_path: Path, level: str) -> str | None:
     )
     return "\n".join(lines[level_start:level_end])
 
+
 def extract_level_focus(level_block: str) -> str | None:
     m = re.search(r"\*\*Level focus.*?\*\*\s*:?\s*(.+)", level_block, flags=re.IGNORECASE)
     return m.group(1).strip() if m else None
+
 
 def get_projects_from_markdown(md_path: Path, level: str) -> list[str]:
     level_block = extract_level_block(md_path, level)
     if not level_block:
         return []
     return re.findall(r"^###\s*Project:\s*(.+)\s*$", level_block, flags=re.IGNORECASE | re.MULTILINE)
+
 
 def extract_project_block(level_block: str, project: str) -> str | None:
     lines = level_block.splitlines()
@@ -65,10 +93,12 @@ def extract_project_block(level_block: str, project: str) -> str | None:
     )
     return "\n".join(lines[proj_start:proj_end])
 
+
 def extract_field(proj_block: str, field_name: str) -> str | None:
     pattern = rf"-\s*\*\*{re.escape(field_name)}.*?\*\*?\s*:?\s*(.+)"
     m = re.search(pattern, proj_block, flags=re.IGNORECASE)
     return m.group(1).strip() if m else None
+
 
 def find_logo_path() -> Path | None:
     for p in LOGO_CANDIDATES:
@@ -95,7 +125,6 @@ if "details" not in st.session_state:
     st.session_state.details = None
 if "crewai_output" not in st.session_state:
     st.session_state.crewai_output = None
-
 
 # ---- Header (logo + app name) ----
 logo_path = find_logo_path()
@@ -191,17 +220,15 @@ if get_details:
     st.session_state.crewai_output = None  # reset old output
 
 
-# ---- Display Details + Notes + CrewAI ----
+# ---- Display Details + Rubric + Notes + CrewAI ----
 if st.session_state.details:
     d = st.session_state.details
 
+    # ---------- Project Details (narrow box) ----------
     st.subheader("Project Details")
-
-    # ✅ Make the details box narrower by centering it in a middle column
     left, mid, right = st.columns([1, 3, 1])  # change to [1,2,1] for even narrower
     with mid:
         with st.container(border=True):
-            # Compact labels (less vertical space than H3 headers)
             st.markdown("**Pathway**")
             st.write(d["pathway"])
 
@@ -219,67 +246,24 @@ if st.session_state.details:
 
     st.divider()
 
-    st.subheader("General Comments - By Project Speech Evaluator")
+    # ---------- Rubric Ratings ----------
+    st.subheader("Rubric Ratings (1–5)")
+    st.caption("Rule: ratings 4–5 → Strengths, ratings 1–3 → Areas for improvement.")
 
-    # Center the comment boxes slightly too (optional)
-    l2, m2, r2 = st.columns([1, 6, 1])
-    with m2:
-        top_left, top_right = st.columns(2)
-        with top_left:
-            excelled = st.text_area(
-                "✅ You excelled at:",
-                height=140,
-                placeholder="E.g., clear structure, strong eye contact, confident opening...",
-            )
-        with top_right:
-            work_on = st.text_area(
-                "🔧 You may want to work on:",
-                height=140,
-                placeholder="E.g., slow down, add pauses, vary pitch, clearer transitions...",
-            )
+    rubric_def = [
+        ("Clarity", "Spoken language is clear and easily understood"),
+        ("Vocal Variety", "Uses tone, speed, and volume as tools"),
+        ("Eye Contact", "Effectively uses eye contact to engage audience"),
+        ("Gestures", "Uses physical gestures effectively"),
+        ("Audience Awareness", "Demonstrates awareness of audience engagement and needs"),
+        ("Comfort Level", "Appears comfortable with the audience"),
+        ("Interest", "Engages audience with interesting, well-constructed content"),
+    ]
 
-        challenge = st.text_area(
-            "🎯 To challenge yourself:",
-            height=140,
-            placeholder="E.g., add 1 audience question + 2 planned pauses next time...",
-        )
-
-        notes_payload = f"""
-Meeting details:
-- Speaker: {speaker_name or "N/A"}
-- Evaluator: {evaluator_name or "N/A"}
-- Date: {meeting_date}
-
-General comments:
-You excelled at:
-{excelled}
-
-You may want to work on:
-{work_on}
-
-To challenge yourself:
-{challenge}
-""".strip()
-
-        if st.button("Generate Evaluation Draft (CrewAI)"):
-            if not (excelled.strip() or work_on.strip() or challenge.strip()):
-                st.warning("Please fill in at least one of the comment boxes before generating.")
-            else:
-                output = run_crewai_eval(
-                    notes=notes_payload,
-                    pathway=d["pathway"],
-                    level=d["level"],
-                    project=d["project"],
-                    level_focus=d["level_focus"],
-                    purpose=d["purpose"],
-                    speech_len=d["speech_len"],
-                )
-                st.session_state.crewai_output = output
-
-        if st.session_state.crewai_output:
-            st.divider()
-            st.subheader("CrewAI Output")
-            st.write(st.session_state.crewai_output)
-
-st.caption(f"Using file: {md_path}")
+    rubric_items = []
+    lrb, mrb, rrb = st.columns([1, 6, 1])
+    with mrb:
+        with st.container(border=True):
+            for i, (name, desc) in enumerate(rubric_def):
+                cA, cB = st.columns([2]()
 
