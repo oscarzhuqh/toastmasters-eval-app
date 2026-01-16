@@ -276,7 +276,7 @@ def render_rubric_table(rubric_def: List[Tuple[str, str]]) -> List[Dict]:
 
 
 # -------------------- UI --------------------
-st.set_page_config(page_title="Toastmasters Evaluation Application", page_icon="☕", layout="centered")
+st.set_page_config(page_title="Toastmasters Evaluation Application (T.E.A.)", page_icon="☕", layout="centered")
 
 st.markdown(
     """
@@ -302,6 +302,7 @@ with h1:
 with h2:
     st.markdown("# Toastmasters Evaluation Application")
     st.caption("T.E.A. — Toastmasters Evaluation Assistant")
+    st.caption("NYP ITI123 Appplication Development Project Effort - By Zhu Qihui (Oscar)")
 
 st.divider()
 
