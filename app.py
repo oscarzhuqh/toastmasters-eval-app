@@ -28,7 +28,7 @@ LOGO_CANDIDATES = [
 
 # -------------------- SPEECH EVALUATION CRITERIA (TOASTMASTERS INTERNATIONAL) -------------------------------
 # Matches your screenshot, including "Well Supported"
-SPEECH EVALUATION_CRITERIA: Dict[str, Dict[int, str]] = {
+SPEECH_EVALUATION_CRITERIA: Dict[str, Dict[int, str]] = {
     "Clarity": {
         5: "Is an exemplary public speaker who is always understood.",
         4: "Excels at communicating using the spoken word.",
