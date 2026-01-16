@@ -30,7 +30,7 @@ LEVEL_PROJECTS = {
         "Introduction to Toastmasters Mentoring",
         "Understanding Your Leadership Style",
         "Understanding Your Communication Style",
-        "Effective Body Language",
+        "Active Listening",
     ],
     "Level 3": [
         "Persuasive Speaking",
