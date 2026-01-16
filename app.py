@@ -300,7 +300,7 @@ with h1:
     if logo_path:
         st.image(str(logo_path), use_container_width=True)
 with h2:
-    st.markdown("# Toastmasters Evaluation Application")
+    st.markdown("# Toastmasters Evaluation Assistant T.E.A.")
     st.caption("T.E.A. — Toastmasters Evaluation Assistant")
     st.caption("NYP ITI123 Appplication Development Project by Zhu Qihui, Oscar 9801937V")
 
