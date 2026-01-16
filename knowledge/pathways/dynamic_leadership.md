@@ -1,5 +1,5 @@
 ---
-title: "Dynamic Leadership — Knowledge Base (Ice Breaker Only)"
+title: "Dynamic Leadership — Knowledge Base"
 doc_type: "pathways_knowledge_base"
 pathway: "Dynamic Leadership"
 version: "1.0"
