@@ -1,13 +1,13 @@
 ---
-title: "Presentation Mastery — Knowledge Base (Ice Breaker Only)"
+title: "Dynamic Leadership — Knowledge Base (Ice Breaker Only)"
 doc_type: "pathways_knowledge_base"
-pathway: "Presentation Mastery"
+pathway: "Dynamic Leadership"
 version: "1.0"
 last_updated: "2026-01-16"
 notes: "Personal knowledge base. Written in my own words."
 ---
 
-# Pathway: Presentation Mastery
+# Pathway: Dynamic Leadership
 
 ## Level 1
 **Level focus:** "Mastering Fundamentals," trains members in the foundational skills of public speaking, speech writing, evaluation, and providing feedback.
