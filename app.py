@@ -87,7 +87,7 @@ ICE_BREAKER_CRITERIA: Dict[str, Dict[int, str]] = {
     },
 }
 
-# Order of rubric rows shown in UI
+# Rubric rows shown in UI (order matters)
 RUBRIC_DEF = [
     ("Clarity", "Spoken language is clear and is easily understood"),
     ("Vocal Variety", "Uses tone, speed, and volume as tools"),
@@ -131,7 +131,10 @@ def extract_level_block(md_path: Path, level: str) -> Optional[str]:
     if level_start is None:
         return None
 
-    level_end = next((i for i in range(level_start + 1, len(lines)) if lines[i].strip().startswith("## ")), len(lines))
+    level_end = next(
+        (i for i in range(level_start + 1, len(lines)) if lines[i].strip().startswith("## ")),
+        len(lines),
+    )
     return "\n".join(lines[level_start:level_end])
 
 def extract_level_focus(level_block: str) -> Optional[str]:
@@ -192,12 +195,8 @@ def is_ice_breaker(project: str) -> bool:
     return project.strip().lower() == "ice breaker"
 
 def build_selected_criteria_text(project: str, rubric_items: List[Dict]) -> str:
-    """
-    For Ice Breaker: inject the meaning of each selected rating into the CrewAI prompt.
-    """
     if not is_ice_breaker(project):
         return ""
-
     lines = ["Evaluation criteria meaning (Ice Breaker):"]
     for item in rubric_items:
         name = item["name"]
@@ -210,35 +209,87 @@ def build_selected_criteria_text(project: str, rubric_items: List[Dict]) -> str:
     return "\n".join(lines)
 
 def render_full_ice_breaker_criteria():
-    """
-    Shows full criteria (5..1) so evaluator understands what each score means.
-    """
     st.markdown("### Evaluation Criteria (Ice Breaker)")
     st.caption("Use these descriptions to guide your 1–5 ratings.")
-
     for name, _desc in RUBRIC_DEF:
         st.markdown(f"**{name}**")
         mapping = ICE_BREAKER_CRITERIA.get(name, {})
-        # show 5..1
         for score in [5, 4, 3, 2, 1]:
             if score in mapping:
                 st.markdown(f"- **{score}** — {mapping[score]}")
         st.markdown("---")
 
+def render_rubric_table(rubric_def: List[Tuple[str, str]]) -> List[Dict]:
+    """
+    Official-sheet-like row layout:
+      [Criteria] | [5 4 3 2 1] | [Comment box]
+    """
+    rubric_items: List[Dict] = []
+
+    with st.container(border=True):
+        # Header row
+        h1, h2, h3 = st.columns([2.2, 3.2, 3.6], vertical_alignment="center")
+        with h1:
+            st.markdown("**Criteria**")
+        with h2:
+            st.markdown("**Rating (5 → 1)**")
+            st.caption("5=Exemplary • 4=Excels • 3=Accomplished • 2=Emerging • 1=Developing")
+        with h3:
+            st.markdown("**Comment**")
+
+        st.markdown("---")
+
+        # Data rows
+        for name, desc in rubric_def:
+            c1, c2, c3 = st.columns([2.2, 3.2, 3.6], vertical_alignment="center")
+
+            with c1:
+                st.markdown(f"**{name}**")
+                st.caption(desc)
+
+            with c2:
+                rating = st.radio(
+                    label=f"{name} rating",
+                    options=[5, 4, 3, 2, 1],
+                    index=1,  # default 4
+                    horizontal=True,
+                    label_visibility="collapsed",
+                    key=f"rubric_rating_{name}",
+                )
+
+            with c3:
+                comment = st.text_area(
+                    label=f"{name} comment",
+                    height=70,
+                    placeholder="Optional short comment…",
+                    label_visibility="collapsed",
+                    key=f"rubric_comment_{name}",
+                )
+
+            rubric_items.append({"name": name, "rating": rating, "comment": comment})
+
+            st.markdown(
+                "<hr style='margin:0.35rem 0; border:0; border-top:1px solid #eee;'>",
+                unsafe_allow_html=True,
+            )
+
+    return rubric_items
+
+
 # -------------------- UI --------------------
 st.set_page_config(page_title="Toastmasters Evaluation Application", page_icon="☕", layout="centered")
 
-# Toastmasters-form vibe for textareas
 st.markdown(
     """
     <style>
     textarea { background-color: #EAF0FF !important; }
+    /* tighter vertical gaps */
+    div[data-testid="stVerticalBlock"] > div { gap: 0.55rem; }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-# Session state
 if "details" not in st.session_state:
     st.session_state.details = None
 if "crewai_output" not in st.session_state:
@@ -283,5 +334,166 @@ if not project_options:
     st.info("Fix: add headings like `### Project: <Project Name>` under `## Level X`.")
     st.stop()
 
-project = st.selectbox("Select Project", project_options, key=f"p_
+project = st.selectbox("Select Project", project_options, key=f"project_{pathway}_{level}")
+
+btn1, btn2 = st.columns([1, 1])
+with btn1:
+    get_details = st.button("Get Details")
+with btn2:
+    clear = st.button("Clear")
+
+if clear:
+    st.session_state.details = None
+    st.session_state.crewai_output = None
+    st.rerun()
+
+if get_details:
+    level_block = extract_level_block(md_path, level)
+    if not level_block:
+        st.error(f"❌ Level '{level}' not found in {md_path.name}.")
+        st.info("Fix: Add heading like `## Level 2` into the markdown file.")
+        st.stop()
+
+    proj_block = extract_project_block(level_block, project)
+    if not proj_block:
+        st.error(
+            f"❌ '{project}' is not found under **{level}** in **{md_path.name}**.\n\n"
+            "✅ Please select the correct pathway OR add this project into the pathway markdown file."
+        )
+        available = re.findall(r"^###\s*Project:\s*(.+)\s*$", level_block, flags=re.IGNORECASE | re.MULTILINE)
+        if available:
+            st.caption("Projects currently found in this pathway + level:")
+            st.write(available)
+        st.stop()
+
+    level_focus = extract_level_focus(level_block) or "Not found"
+    purpose = extract_field(proj_block, "Purpose") or "Not found"
+    speech_len = (
+        extract_field(proj_block, "Speech length (optional)")
+        or extract_field(proj_block, "Speech length")
+        or "Not found"
+    )
+
+    st.session_state.details = {
+        "pathway": pathway,
+        "level": level,
+        "project": project,
+        "level_focus": level_focus,
+        "purpose": purpose,
+        "speech_len": speech_len,
+    }
+    st.session_state.crewai_output = None
+
+# Show details + rubric + generation
+if st.session_state.details:
+    d = st.session_state.details
+
+    # Project Details (narrow box)
+    st.subheader("Project Details")
+    left, mid, right = st.columns([1, 3, 1])
+    with mid:
+        with st.container(border=True):
+            st.markdown("**Pathway**")
+            st.write(d["pathway"])
+
+            st.markdown("---")
+            st.markdown("**Level focus**")
+            st.write(d["level_focus"])
+
+            st.markdown("---")
+            st.markdown("**Purpose**")
+            st.write(d["purpose"])
+
+            st.markdown("---")
+            st.markdown("**Speech length**")
+            st.write(d["speech_len"])
+
+    st.divider()
+
+    # Rubric (official layout)
+    st.subheader("Rubric Ratings (1–5)")
+    st.caption("Rule: ratings 4–5 → Strengths, ratings 1–3 → Areas for improvement.")
+
+    if is_ice_breaker(d["project"]):
+        with st.expander("View Evaluation Criteria (Ice Breaker)"):
+            render_full_ice_breaker_criteria()
+
+    rubric_items = render_rubric_table(RUBRIC_DEF)
+
+    strengths_text, improvements_text = build_rubric_summary(rubric_items)
+    selected_criteria_text = build_selected_criteria_text(d["project"], rubric_items)
+
+    s1, s2 = st.columns(2)
+    with s1:
+        st.markdown("### Strengths (4–5)")
+        st.markdown(strengths_text)
+    with s2:
+        st.markdown("### Areas for Improvement (1–3)")
+        st.markdown(improvements_text)
+
+    st.divider()
+
+    # General Comments
+    st.subheader("General Comments - By Project Speech Evaluator")
+
+    l2, m2, r2 = st.columns([1, 6, 1])
+    with m2:
+        t1, t2 = st.columns(2)
+        with t1:
+            excelled = st.text_area("✅ You excelled at:", height=140)
+        with t2:
+            work_on = st.text_area("🔧 You may want to work on:", height=140)
+
+        challenge = st.text_area("🎯 To challenge yourself:", height=140)
+
+        notes_payload = f"""
+Meeting details:
+- Speaker: {speaker_name or "N/A"}
+- Evaluator: {evaluator_name or "N/A"}
+- Date: {meeting_date}
+
+{selected_criteria_text}
+
+Rubric summary (auto):
+Strengths (ratings 4–5):
+{strengths_text}
+
+Areas for improvement (ratings 1–3):
+{improvements_text}
+
+General comments:
+You excelled at:
+{excelled}
+
+You may want to work on:
+{work_on}
+
+To challenge yourself:
+{challenge}
+""".strip()
+
+        if st.button("Generate Evaluation Draft (CrewAI)"):
+            has_general = (excelled.strip() or work_on.strip() or challenge.strip())
+            has_any_rubric_comment = any((x.get("comment") or "").strip() for x in rubric_items)
+            if not has_general and not has_any_rubric_comment:
+                st.warning("Please add at least one rubric comment or fill one general comment box before generating.")
+            else:
+                output = run_crewai_eval(
+                    notes=notes_payload,
+                    pathway=d["pathway"],
+                    level=d["level"],
+                    project=d["project"],
+                    level_focus=d["level_focus"],
+                    purpose=d["purpose"],
+                    speech_len=d["speech_len"],
+                )
+                st.session_state.crewai_output = output
+
+        if st.session_state.crewai_output:
+            st.divider()
+            st.subheader("CrewAI Output")
+            with st.container(border=True):
+                st.write(st.session_state.crewai_output)
+
+st.caption(f"Using file: {md_path}")
 
