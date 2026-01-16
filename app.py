@@ -14,7 +14,7 @@ PATHWAY_FILES = {
     "Visionary Communication": "visionary_communication.md",
 }
 
-LEVELS = ["Level 1", "Level 2", "Level 3", "Level 4", "Level 5"]
+LEVELS = ["Level 1", "Level 2"]
 
 # Example project lists (you can edit anytime)
 LEVEL_PROJECTS = {
