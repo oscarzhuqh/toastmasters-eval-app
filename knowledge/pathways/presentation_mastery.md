@@ -22,7 +22,7 @@ notes: "Personal knowledge base. Written in my own words."
 - **Purpose**: The purpose of this project is to practice applying feedback and serve as a speech evaluator during a club meeting. The purpose of this speech is for the member to present a speech and receive feedback from the evaluator.
 - **Speech length**: 5–7 minutes
 
-- ### Project: Evaluation and Feedback (2nd Speech)
+### Project: Evaluation and Feedback (2nd Speech)
 - **Type:** Required
 - **Purpose**: The member will deliver a well-organized speech on any topic and incorporate feedback from their previous speech evaluation. The member may choose to present the same speech, a revision of their first Evaluation and Feedback speech, or a new speech.
 - **Speech length**: 5–7 minutes
