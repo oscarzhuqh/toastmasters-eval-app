@@ -16,24 +16,6 @@ PATHWAY_FILES = {
 
 LEVELS = ["Level 1", "Level 2"]
 
-LEVEL_PROJECTS = {
-    "Level 1": [
-        "Ice Breaker",
-        "Evaluation and Feedback (1st Speech)",
-        "Evaluation and Feedback (2nd Speech)",
-        "Introduction to Vocal Variety and Body Language",
-        "Writing a Speech with Purpose",
-    ],
-    "Level 2": [
-        "Connect with Your Audience",
-        "Introduction to Toastmasters Mentoring",
-        "Understanding Your Leadership Style",
-        "Understanding Your Communication Style",
-        "Active Listening",
-        "Managing Time",
-    ],
-}
-
 # -------------------- PARSERS --------------------
 def extract_level_block(md_path: Path, level: str) -> str | None:
     if not md_path.exists():
@@ -46,12 +28,22 @@ def extract_level_block(md_path: Path, level: str) -> str | None:
     if level_start is None:
         return None
 
-    level_end = next((i for i in range(level_start + 1, len(lines)) if lines[i].strip().startswith("## ")), len(lines))
+    level_end = next(
+        (i for i in range(level_start + 1, len(lines)) if lines[i].strip().startswith("## ")),
+        len(lines),
+    )
     return "\n".join(lines[level_start:level_end])
 
 def extract_level_focus(level_block: str) -> str | None:
     m = re.search(r"\*\*Level focus.*?\*\*\s*:?\s*(.+)", level_block, flags=re.IGNORECASE)
     return m.group(1).strip() if m else None
+
+def get_projects_from_markdown(md_path: Path, level: str) -> list[str]:
+    """Auto-build dropdown options from headings: ### Project: <name>"""
+    level_block = extract_level_block(md_path, level)
+    if not level_block:
+        return []
+    return re.findall(r"^###\s*Project:\s*(.+)\s*$", level_block, flags=re.IGNORECASE | re.MULTILINE)
 
 def extract_project_block(level_block: str, project: str) -> str | None:
     lines = level_block.splitlines()
@@ -80,21 +72,26 @@ st.title("Toastmasters Project Details")
 pathway = st.selectbox("Select Pathway", list(PATHWAY_FILES.keys()))
 level = st.selectbox("Select Level", LEVELS)
 
-# ✅ Project dropdown changes with Level (based on your hardcoded list)
-project_options = LEVEL_PROJECTS.get(level, [])
-if not project_options:
-    st.warning(f"No project list configured for {level}. Add it in LEVEL_PROJECTS.")
-    st.stop()
-
-project = st.selectbox("Select Project", project_options, key=f"project_{level}")
-
 md_path = KB_DIR / PATHWAY_FILES[pathway]
 
-if st.button("Get Details"):
-    if not md_path.exists():
-        st.error(f"Markdown file not found for '{pathway}'. Expected: {md_path}")
-        st.stop()
+# ✅ Project dropdown is driven by the selected pathway + level markdown
+project_options = get_projects_from_markdown(md_path, level)
 
+if not md_path.exists():
+    st.error(f"Markdown file not found for '{pathway}'. Expected: {md_path}")
+    st.stop()
+
+if not project_options:
+    st.warning(
+        f"No projects found for {level} in '{md_path.name}'.\n\n"
+        "Add headings like:\n"
+        "### Project: Ice Breaker"
+    )
+    st.stop()
+
+project = st.selectbox("Select Project", project_options, key=f"project_{pathway}_{level}")
+
+if st.button("Get Details"):
     level_block = extract_level_block(md_path, level)
     if not level_block:
         st.error(f"❌ Level '{level}' not found in {md_path.name}.")
@@ -105,18 +102,8 @@ if st.button("Get Details"):
     if not proj_block:
         st.error(
             f"❌ '{project}' was not found under {level} for the '{pathway}' pathway.\n\n"
-            "This usually means the project belongs to a different pathway, or your markdown file "
-            "doesn’t contain it yet.\n\n"
-            "✅ Please select the correct pathway OR add this project into the pathway markdown file."
+            "✅ Please ensure you selected the correct pathway OR add this project into the pathway markdown file."
         )
-
-        # Show what projects ARE actually inside this pathway+level markdown
-        available = re.findall(r"^###\s*Project:\s*(.+)\s*$", level_block, flags=re.IGNORECASE | re.MULTILINE)
-        if available:
-            st.caption("Projects found in this pathway + level:")
-            st.write(available)
-
-        st.info(f"Expected heading format in {md_path.name}:\n### Project: {project}")
         st.stop()
 
     level_focus = extract_level_focus(level_block) or "Not found"
@@ -145,3 +132,4 @@ if st.button("Get Details"):
         st.write(speech_len)
 
 st.caption(f"Using file: {md_path}")
+
