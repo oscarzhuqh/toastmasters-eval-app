@@ -19,8 +19,8 @@ LEVELS = ["Level 1"]
 
 LEVEL_1_PROJECTS = [
     "Ice Breaker",
-    "Evaluation and Feedback (First Speech)",
-    "Evaluation and Feedback (Second Speech)",
+    "Evaluation and Feedback (1st Speech)",
+    "Evaluation and Feedback (2nd Speech)",
     "Introduction to Vocal Variety and Body Language",
     "Writing a Speech with Purpose",
 ]
