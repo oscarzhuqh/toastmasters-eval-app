@@ -113,7 +113,7 @@ st.divider()
 st.subheader("Meeting Details")
 c1, c2, c3 = st.columns(3)
 with c1:
-    speaker_name = st.text_input("Speaker Name", placeholder="e.g., Alex Tan")
+    speaker_name = st.text_input("Speaker Name", placeholder="e.g., Lee Ching Yuh")
 with c2:
     evaluator_name = st.text_input("Evaluator Name", placeholder="e.g., Oscar Zhu")
 with c3:
@@ -219,7 +219,7 @@ if st.session_state.details:
 
     st.divider()
 
-    st.subheader("General Comments")
+    st.subheader("General Comments - By Project Speech Evaluator")
 
     # Center the comment boxes slightly too (optional)
     l2, m2, r2 = st.columns([1, 6, 1])
