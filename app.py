@@ -301,7 +301,7 @@ with h1:
         st.image(str(logo_path), use_container_width=True)
 with h2:
     st.markdown("# Toastmasters Evaluation Assistant T.E.A.")
-    st.caption("Objective of T.E.A. - Help evaluators turn rubric ratings + rough notes into a structured, project-aligned evaluation draft, by retrieving the selected Pathways project purpose/level focus from a local knowledge base and using CrewAI to generate an editable evaluation.)
+    st.caption("Objective of T.E.A. is to help speech evaluators turn rubric ratings + rough notes into a structured, project-aligned evaluation draft, by retrieving the selected Pathways project purpose/level focus from a local knowledge base and using CrewAI to generate an editable evaluation.)
     st.caption("NYP ITI123 Appplication Development Project by Zhu Qihui, Oscar 9801937V")
 
 st.divider()
