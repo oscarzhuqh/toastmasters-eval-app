@@ -4,27 +4,52 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-# CrewAI imports (works for most CrewAI versions)
 from crewai import Agent, Task, Crew, Process
+
+
+def _get_streamlit_secret(key: str) -> Optional[str]:
+    """Safely read Streamlit secrets if running in Streamlit; otherwise return None."""
+    try:
+        import streamlit as st  # type: ignore
+
+        if hasattr(st, "secrets") and key in st.secrets:
+            val = str(st.secrets[key]).strip()
+            return val or None
+    except Exception:
+        pass
+    return None
 
 
 def _get_api_key() -> Optional[str]:
     """
     Tries (in order):
-      1) Streamlit secrets (if running inside Streamlit Cloud)
-      2) Environment variable OPENAI_API_KEY
+      1) Streamlit secrets: OPENAI_API_KEY
+      2) Environment variable: OPENAI_API_KEY
     """
-    # Streamlit secrets (optional)
-    try:
-        import streamlit as st  # type: ignore
-        if hasattr(st, "secrets") and "OPENAI_API_KEY" in st.secrets:
-            return str(st.secrets["OPENAI_API_KEY"]).strip()
-    except Exception:
-        pass
+    key = _get_streamlit_secret("OPENAI_API_KEY")
+    if key:
+        return key
 
-    # Env var
     key = os.getenv("OPENAI_API_KEY", "").strip()
     return key or None
+
+
+def _get_model_name() -> str:
+    """
+    Tries (in order):
+      1) Environment variable: OPENAI_MODEL (can be blank)
+      2) Streamlit secrets: OPENAI_MODEL
+      3) Fallback: gpt-4o-mini
+    """
+    # Start with env (blank allowed)
+    model = os.getenv("OPENAI_MODEL", "").strip()
+
+    # Streamlit secrets can override model too
+    secret_model = _get_streamlit_secret("OPENAI_MODEL")
+    if secret_model:
+        model = secret_model
+
+    return model or "gpt-4o-mini"
 
 
 def _make_llm():
@@ -33,35 +58,28 @@ def _make_llm():
 
     Works across common setups:
       - If your CrewAI supports `crewai.LLM`, use it.
-      - Otherwise, let CrewAI use the provider/model via env vars.
+      - Otherwise, set env vars so provider wrappers can still work.
 
-    Recommended env vars:
-      OPENAI_API_KEY
-      OPENAI_MODEL (optional, default below)
+    Required:
+      OPENAI_API_KEY (Streamlit Secrets or env var)
+    Optional:
+      OPENAI_MODEL (Streamlit Secrets or env var)
     """
     api_key = _get_api_key()
-    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
+    model = _get_model_name()
 
-    # Newer CrewAI versions expose an LLM helper
+    if not api_key:
+        raise RuntimeError(
+            "OPENAI_API_KEY not found. Add it to Streamlit Secrets or set it as an environment variable."
+        )
+
+    # Prefer CrewAI's LLM helper if available
     try:
         from crewai import LLM  # type: ignore
 
-        if not api_key:
-            raise RuntimeError(
-                "OPENAI_API_KEY not found. Set it in Streamlit Secrets or environment variables."
-            )
-
-        return LLM(
-            model=model,
-            api_key=api_key,
-        )
+        return LLM(model=model, api_key=api_key)
     except Exception:
-        # Fallback: return a dict-like config that many setups accept, or None.
-        # CrewAI may read OPENAI_API_KEY directly from env, so this can still work.
-        if not api_key:
-            raise RuntimeError(
-                "OPENAI_API_KEY not found. Set it in Streamlit Secrets or environment variables."
-            )
+        # Fallback: some setups let CrewAI/provider libs read env vars directly
         os.environ["OPENAI_API_KEY"] = api_key
         os.environ["OPENAI_MODEL"] = model
         return None
@@ -79,9 +97,8 @@ def run_crewai_eval(
 ) -> str:
     """
     Returns a structured Toastmasters evaluation draft in Markdown.
-    Uses evaluator notes + KB fields (purpose, level_focus, etc.) as context.
 
-    Your Streamlit app should pass:
+    Streamlit app should pass:
       - notes (includes rubric summary + your general comments)
       - pathway, level, project, level_focus, purpose, speech_len
     """
@@ -193,9 +210,12 @@ Evaluator input (do NOT invent extra observations beyond these notes):
 
 
 if __name__ == "__main__":
-    # Quick local test (optional)
     demo = run_crewai_eval(
-        notes="Speaker: Alex\nEvaluator: Oscar\nDate: 2026-01-17\nStrengths: - Clarity (4/5)\nImprovements: - Vocal Variety (3/5)\nYou excelled at: strong structure\nWork on: more pauses\nChallenge: add 1 audience question",
+        notes=(
+            "Speaker: Alex\nEvaluator: Oscar\nDate: 2026-01-17\n"
+            "Strengths: - Clarity (4/5)\nImprovements: - Vocal Variety (3/5)\n"
+            "You excelled at: strong structure\nWork on: more pauses\nChallenge: add 1 audience question"
+        ),
         pathway="Presentation Mastery",
         level="Level 1",
         project="Ice Breaker",
