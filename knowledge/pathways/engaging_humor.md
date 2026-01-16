@@ -55,18 +55,6 @@ notes: "Personal knowledge base. Written in my own words."
 - **Purpose**: The purpose of this project is for the member to clearly define how Toastmasters envisions mentoring. The purpose of this speech is for the member to share some aspect of a previous experience as a protégé.
 - **Speech length**: 5–7 minutes
 
-### Project: Understanding Your Communication Style
-- **Type:** Required
-- **Purpose**: The purpose of this project is for the member to learn about different communication styles and identify his or
-her primary style. The purpose of this speech is for the member to share the impact of his or her style on others.
-- **Speech length**: 5–7 minutes
-
-### Project: Understanding Your Leadership Style
-- **Type:** Required
-- **Purpose**: The purpose of this project is for the member to identify his or her primary leadership style or styles. The purpose of this speech is for the member to share some aspect of his or her primary leadership style or
-discuss leadership styles in general.
-- **Speech length**: 5–7 minutes
-
 ### Project: Know Your Sense of Humor
 - **Type:** Required
 - **Purpose**: The purpose of this project is to begin developing a collection of humorous stories and to present a speech that includes humor.
