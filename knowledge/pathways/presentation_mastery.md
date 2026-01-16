@@ -1,5 +1,5 @@
 ---
-title: "Presentation Mastery — Knowledge Base
+title: "Presentation Mastery — Knowledge Base"
 doc_type: "pathways_knowledge_base"
 pathway: "Presentation Mastery"
 version: "1.0"
