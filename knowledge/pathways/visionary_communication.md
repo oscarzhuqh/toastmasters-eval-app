@@ -62,8 +62,3 @@ her primary style. The purpose of this speech is for the member to share the imp
 discuss leadership styles in general.
 - **Speech length**: 5–7 minutes
 
-### Project: Active Listening
-- **Type:** Required
-- **Purpose**: The purpose of this project is for the member to demonstrate his or her ability to listen to what others say.
-- **Speech length**: 5–7 minutes
-
