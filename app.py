@@ -2,11 +2,20 @@ import streamlit as st
 from pathlib import Path
 import re
 
-# ✅ Update this path if your file name/location differs
-MD_PATH = Path(__file__).parent / "knowledge" / "pathways" / "presentation_mastery.md"
+# Folder where your pathway markdown files live
+KB_DIR = Path(__file__).parent / "knowledge" / "pathways"
 
-# ✅ Hard-coded dropdown options (Level 1 only for now)
-LEVELS = ["Level 1"]  # you can add "Level 2"..."Level 5" later
+# 6 pathways dropdown + expected filenames
+PATHWAY_FILES = {
+    "Dynamic Leadership": "dynamic_leadership.md",
+    "Engaging Humor": "engaging_humor.md",
+    "Motivational Strategies": "motivational_strategies.md",
+    "Persuasive Influence": "persuasive_influence.md",
+    "Presentation Mastery": "presentation_mastery.md",
+    "Visionary Communication": "visionary_communication.md",
+}
+
+LEVELS = ["Level 1"]
 
 LEVEL_1_PROJECTS = [
     "Ice Breaker",
@@ -31,7 +40,7 @@ def extract_level_block(md_path: Path, level: str) -> str | None:
     return "\n".join(lines[level_start:level_end])
 
 def extract_level_focus(level_block: str) -> str | None:
-    # Supports: **Level focus (your words):** text  (colon inside/outside bold, spaces ok)
+    # Supports: **Level focus (your words):** text (spaces ok, colon inside/outside bold ok)
     m = re.search(r"\*\*Level focus.*?\*\*\s*:?\s*(.+)", level_block, flags=re.IGNORECASE)
     return m.group(1).strip() if m else None
 
@@ -47,7 +56,6 @@ def extract_project_block(level_block: str, project: str) -> str | None:
         (i for i in range(proj_start + 1, len(lines)) if lines[i].strip().startswith("### Project:")),
         len(lines),
     )
-
     return "\n".join(lines[proj_start:proj_end])
 
 def extract_field(proj_block: str, field_name: str) -> str | None:
@@ -57,44 +65,46 @@ def extract_field(proj_block: str, field_name: str) -> str | None:
       - **Purpose:** text
       - **Speech length (optional)**: text
       - **Speech length**: text
-      (colon can be inside/outside bold; spaces around colon are ok)
     """
     pattern = rf"-\s*\*\*{re.escape(field_name)}.*?\*\*?\s*:?\s*(.+)"
     m = re.search(pattern, proj_block, flags=re.IGNORECASE)
     return m.group(1).strip() if m else None
 
+
 # ---------------- UI ----------------
-st.set_page_config(page_title="Toastmasters KB (Level 1)", page_icon="🗂️", layout="centered")
+st.set_page_config(page_title="Toastmasters KB", page_icon="🗂️", layout="centered")
+st.title("Toastmasters Project Details")
 
-st.title("Toastmasters Project Details (Level 1)")
-st.write("Select a Level 1 project and retrieve details from your local Markdown knowledge base.")
-
+pathway = st.selectbox("Select Pathway", list(PATHWAY_FILES.keys()))
 level = st.selectbox("Select Level", LEVELS)
-
-# Only Level 1 projects for now
 project = st.selectbox("Select Project", LEVEL_1_PROJECTS)
 
+md_path = KB_DIR / PATHWAY_FILES[pathway]
+
 if st.button("Get Details"):
-    if not MD_PATH.exists():
-        st.error(f"Markdown file not found: {MD_PATH}")
+    if not md_path.exists():
+        st.error(
+            f"Markdown file not found for '{pathway}'.\n\n"
+            f"Expected: {md_path}\n\n"
+            "Create/upload the file into knowledge/pathways/."
+        )
         st.stop()
 
-    level_block = extract_level_block(MD_PATH, level)
+    level_block = extract_level_block(md_path, level)
     if not level_block:
-        st.error(f"Level '{level}' not found in the Markdown file.\n\nUsing file: {MD_PATH}")
+        st.error(f"Level '{level}' not found in {md_path.name}.")
         st.stop()
 
     proj_block = extract_project_block(level_block, project)
     if not proj_block:
         st.error(
-            f"Project '{project}' not found under {level}.\n\n"
-            f"Make sure your markdown has a heading exactly like:\n"
+            f"Project '{project}' not found under {level} in {md_path.name}.\n\n"
+            f"Make sure your markdown has exactly:\n"
             f"### Project: {project}"
         )
         st.stop()
 
     level_focus = extract_level_focus(level_block) or "Not found"
-
     purpose = extract_field(proj_block, "Purpose") or "Not found"
     speech_len = (
         extract_field(proj_block, "Speech length (optional)")
@@ -104,6 +114,10 @@ if st.button("Get Details"):
 
     st.subheader("Project Details")
     with st.container(border=True):
+        st.markdown("### Pathway")
+        st.write(pathway)
+
+        st.markdown("---")
         st.markdown("### Level focus")
         st.write(level_focus)
 
@@ -115,4 +129,5 @@ if st.button("Get Details"):
         st.markdown("### Speech length")
         st.write(speech_len)
 
-st.caption(f"Using file: {MD_PATH}")
+st.caption(f"Using file: {md_path}")
+
