@@ -1,13 +1,13 @@
 ---
-title: "Presentation Mastery — Knowledge Base"
+title: "Visionary Communication — Knowledge Base"
 doc_type: "pathways_knowledge_base"
-pathway: "Presentation Mastery"
+pathway: "Visionary Communication"
 version: "1.0"
 last_updated: "2026-01-16"
 notes: "Personal knowledge base. Written in my own words."
 ---
 
-# Pathway: Presentation Mastery
+# Pathway: Visionary Communication
 
 ## Level 1
 **Level focus:** "Mastering Fundamentals," trains members in the foundational skills of public speaking, speech writing, evaluation, and providing feedback.
@@ -44,11 +44,6 @@ notes: "Personal knowledge base. Written in my own words."
 
 ## Level 2
 **Level focus:**: Toastmasters Level 2 in Pathways shifts focus from basics to applying skills, with projects varying by path but generally emphasizing audience connection, nonverbal cues (body language/gestures), time management, and understanding different communication/leadership styles (Supportive, Analytical, Initiating, Direct) to tailor your message for impact. The goal is to become more self-aware and adapt your delivery and content to resonate better with diverse listeners and situations, often involving recording your speech for self-evaluation. 
-
-### Project: Connect with Your Audience
-- **Type:** Required
-- **Purpose**: The purpose of this project is for the member to practice the skills needed to connect with an unfamiliar audience.
-- **Speech length**: 5–7 minutes
 
 ### Project: Introduction to Toastmasters Mentoring
 - **Type:** Required
