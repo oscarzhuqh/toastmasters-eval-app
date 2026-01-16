@@ -25,6 +25,14 @@ LEVEL_1_PROJECTS = [
     "Writing a Speech with Purpose",
 ]
 
+LEVEL_2_PROJECTS = [
+    "Connect with your Audience",
+    "Introduction to Toastmasters Mentoring",
+    "Understanding your communication Style",
+    "Understanding your leadership style",
+    "Active Listening",
+]
+
 def extract_level_block(md_path: Path, level: str) -> str | None:
     if not md_path.exists():
         return None
