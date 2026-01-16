@@ -15,7 +15,7 @@ PATHWAY_FILES = {
     "Visionary Communication": "visionary_communication.md",
 }
 
-LEVELS = ["Level 1"]
+LEVELS = ["Level 1","Level 2"]
 
 LEVEL_1_PROJECTS = [
     "Ice Breaker",
