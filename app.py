@@ -31,6 +31,7 @@ LEVEL_PROJECTS = {
         "Understanding Your Leadership Style",
         "Understanding Your Communication Style",
         "Active Listening",
+         "Managing Time",
     ],
     "Level 3": [
         "Persuasive Speaking",
