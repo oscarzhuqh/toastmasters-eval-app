@@ -56,7 +56,7 @@ st.write("Reads project details from a local Markdown knowledge base.")
 level = st.selectbox("Select Level", ["Level 1", "Level 2", "Level 3", "Level 4", "Level 5"])
 project = st.text_input("Project name (must match Markdown heading)", "Ice Breaker")
 
-if st.button("Get Purpose"):
+if st.button("Get Speech Purpose and Speech Length Details"):
     proj_block = extract_project_block(MD_PATH, level, project)
 
     if proj_block is None:
