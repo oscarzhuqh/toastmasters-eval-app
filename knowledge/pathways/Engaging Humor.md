@@ -1,13 +1,13 @@
 ---
-title: "Presentation Mastery — Knowledge Base"
+title: "Engaging Humor— Knowledge Base"
 doc_type: "pathways_knowledge_base"
-pathway: "Presentation Mastery"
+pathway: "Engaging Humor"
 version: "1.0"
 last_updated: "2026-01-16"
 notes: "Personal knowledge base. Written in my own words."
 ---
 
-# Pathway: Presentation Mastery
+# Pathway: Engaging Humor
 
 ## Level 1
 **Level focus:** "Mastering Fundamentals," trains members in the foundational skills of public speaking, speech writing, evaluation, and providing feedback.
@@ -67,8 +67,8 @@ her primary style. The purpose of this speech is for the member to share the imp
 discuss leadership styles in general.
 - **Speech length**: 5–7 minutes
 
-### Project: Active Listening
+### Project: Know Your Sense of Humor
 - **Type:** Required
-- **Purpose**: The purpose of this project is for the member to demonstrate his or her ability to listen to what others say.
+- **Purpose**: The purpose of this project is to begin developing a collection of humorous stories and to present a speech that includes humor.
 - **Speech length**: 5–7 minutes
 
