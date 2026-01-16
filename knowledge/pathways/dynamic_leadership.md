@@ -66,9 +66,3 @@ her primary style. The purpose of this speech is for the member to share the imp
 - **Purpose**: The purpose of this project is for the member to identify his or her primary leadership style or styles. The purpose of this speech is for the member to share some aspect of his or her primary leadership style or
 discuss leadership styles in general.
 - **Speech length**: 5–7 minutes
-
-### Project: Managing Time
-- **Type:** Required
-- **Purpose**: The purpose of this project is for the member to observe his or her time management patterns.
-- **Speech length**: 5–7 minutes
-
