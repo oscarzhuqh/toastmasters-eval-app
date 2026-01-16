@@ -2,7 +2,7 @@ import streamlit as st
 from pathlib import Path
 import re
 
-from crewai_eval import run_crewai_eval  # <-- NEW
+from crewai_eval import run_crewai_eval
 
 # -------------------- CONFIG --------------------
 KB_DIR = Path(__file__).parent / "knowledge" / "pathways"
@@ -17,6 +17,13 @@ PATHWAY_FILES = {
 }
 
 LEVELS = ["Level 1", "Level 2"]
+
+# Logo: put "TEA TM Logo.png" beside app.py (same folder), OR put a copy at assets/logo.png
+LOGO_CANDIDATES = [
+    Path(__file__).parent / "TEA TM Logo.png",
+    Path(__file__).parent / "assets" / "logo.png",
+    Path(__file__).parent / "assets" / "TEA TM Logo.png",
+]
 
 # -------------------- PARSERS --------------------
 def extract_level_block(md_path: Path, level: str) -> str | None:
@@ -65,9 +72,24 @@ def extract_field(proj_block: str, field_name: str) -> str | None:
     m = re.search(pattern, proj_block, flags=re.IGNORECASE)
     return m.group(1).strip() if m else None
 
+def find_logo_path() -> Path | None:
+    for p in LOGO_CANDIDATES:
+        if p.exists():
+            return p
+    return None
+
 # -------------------- UI --------------------
-st.set_page_config(page_title="Toastmasters Project Details", page_icon="🗂️", layout="centered")
-st.title("Toastmasters Project Details")
+st.set_page_config(page_title="Toastmasters Evaluation Application", page_icon="☕", layout="centered")
+
+# Light blue textbox styling (optional)
+st.markdown(
+    """
+    <style>
+    textarea { background-color: #EAF0FF !important; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # session state init
 if "details" not in st.session_state:
@@ -75,6 +97,31 @@ if "details" not in st.session_state:
 if "crewai_output" not in st.session_state:
     st.session_state.crewai_output = None
 
+# ---- Header (logo + app name) ----
+logo_path = find_logo_path()
+h1, h2 = st.columns([1, 5], vertical_alignment="center")
+with h1:
+    if logo_path:
+        st.image(str(logo_path), use_container_width=True)
+with h2:
+    st.markdown("# Toastmasters Evaluation Application")
+    st.caption("T.E.A. — Toastmasters Evaluation Assistant")
+
+st.divider()
+
+# ---- Meeting details fields (top of app) ----
+st.subheader("Meeting Details")
+c1, c2, c3 = st.columns(3)
+with c1:
+    speaker_name = st.text_input("Speaker Name", placeholder="e.g., Alex Tan")
+with c2:
+    evaluator_name = st.text_input("Evaluator Name", placeholder="e.g., Oscar Zhu")
+with c3:
+    meeting_date = st.date_input("Date of Meeting")
+
+st.divider()
+
+# ---- Selection: Pathway / Level / Project ----
 pathway = st.selectbox("Select Pathway", list(PATHWAY_FILES.keys()))
 level = st.selectbox("Select Level", LEVELS)
 
@@ -144,7 +191,7 @@ if get_details:
     }
     st.session_state.crewai_output = None  # reset old output
 
-# ----- Display Details (if available) -----
+# ----- Display Details + Notes + CrewAI -----
 if st.session_state.details:
     d = st.session_state.details
 
@@ -165,15 +212,54 @@ if st.session_state.details:
         st.markdown("### Speech length")
         st.write(d["speech_len"])
 
-    st.markdown("## Evaluator Notes")
-    notes = st.text_area("Paste your rough notes (bullet points ok):", height=160)
+    st.divider()
+
+    st.subheader("General Comments")
+
+    top_left, top_right = st.columns(2)
+    with top_left:
+        excelled = st.text_area(
+            "✅ You excelled at:",
+            height=140,
+            placeholder="E.g., clear structure, strong eye contact, confident opening...",
+        )
+    with top_right:
+        work_on = st.text_area(
+            "🔧 You may want to work on:",
+            height=140,
+            placeholder="E.g., slow down, add pauses, vary pitch, clearer transitions...",
+        )
+
+    challenge = st.text_area(
+        "🎯 To challenge yourself:",
+        height=140,
+        placeholder="E.g., add 1 audience question + 2 planned pauses next time...",
+    )
+
+    # Build a clean input payload for CrewAI
+    notes_payload = f"""
+Meeting details:
+- Speaker: {speaker_name or "N/A"}
+- Evaluator: {evaluator_name or "N/A"}
+- Date: {meeting_date}
+
+General comments:
+You excelled at:
+{excelled}
+
+You may want to work on:
+{work_on}
+
+To challenge yourself:
+{challenge}
+""".strip()
 
     if st.button("Generate Evaluation Draft (CrewAI)"):
-        if not notes.strip():
-            st.warning("Please paste some evaluator notes first.")
+        if not (excelled.strip() or work_on.strip() or challenge.strip()):
+            st.warning("Please fill in at least one of the comment boxes before generating.")
         else:
             output = run_crewai_eval(
-                notes=notes,
+                notes=notes_payload,
                 pathway=d["pathway"],
                 level=d["level"],
                 project=d["project"],
@@ -184,7 +270,8 @@ if st.session_state.details:
             st.session_state.crewai_output = output
 
     if st.session_state.crewai_output:
-        st.markdown("## CrewAI Output")
+        st.divider()
+        st.subheader("CrewAI Output")
         st.write(st.session_state.crewai_output)
 
 st.caption(f"Using file: {md_path}")
