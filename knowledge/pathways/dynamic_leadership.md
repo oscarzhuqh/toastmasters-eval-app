@@ -45,11 +45,6 @@ notes: "Personal knowledge base. Written in my own words."
 ## Level 2
 **Level focus:**: Toastmasters Level 2 in Pathways shifts focus from basics to applying skills, with projects varying by path but generally emphasizing audience connection, nonverbal cues (body language/gestures), time management, and understanding different communication/leadership styles (Supportive, Analytical, Initiating, Direct) to tailor your message for impact. The goal is to become more self-aware and adapt your delivery and content to resonate better with diverse listeners and situations, often involving recording your speech for self-evaluation. 
 
-### Project: Connect with Your Audience
-- **Type:** Required
-- **Purpose**: The purpose of this project is for the member to practice the skills needed to connect with an unfamiliar audience.
-- **Speech length**: 5–7 minutes
-
 ### Project: Introduction to Toastmasters Mentoring
 - **Type:** Required
 - **Purpose**: The purpose of this project is for the member to clearly define how Toastmasters envisions mentoring. The purpose of this speech is for the member to share some aspect of a previous experience as a protégé.
