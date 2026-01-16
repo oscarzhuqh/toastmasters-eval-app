@@ -26,8 +26,8 @@ LOGO_CANDIDATES = [
     APP_DIR / "assets" / "logo.png",
 ]
 
-# -------------------- SPEECH EVALUATION CRITERIA (TOASTMASTERS INTERNATIONAL) -------------------------------
-# Matches your screenshot, including "Well Supported"
+# -------------------- EVALUATION CRITERIA (Ice Breaker) --------------------
+# IMPORTANT: variable name matches your rename request
 SPEECH_EVALUATION_CRITERIA: Dict[str, Dict[int, str]] = {
     "Clarity": {
         5: "Is an exemplary public speaker who is always understood.",
@@ -195,25 +195,26 @@ def is_ice_breaker(project: str) -> bool:
     return project.strip().lower() == "ice breaker"
 
 def build_selected_criteria_text(project: str, rubric_items: List[Dict]) -> str:
+    # Only attach criteria meaning for Ice Breaker (your current criteria set)
     if not is_ice_breaker(project):
         return ""
     lines = ["Evaluation criteria meaning (Ice Breaker):"]
     for item in rubric_items:
         name = item["name"]
         rating = int(item["rating"])
-        desc = ICE_BREAKER_CRITERIA.get(name, {}).get(rating, "")
+        desc = SPEECH_EVALUATION_CRITERIA.get(name, {}).get(rating, "")
         if desc:
             lines.append(f"- {name} {rating}/5: {desc}")
         else:
             lines.append(f"- {name} {rating}/5")
     return "\n".join(lines)
 
-def render_full_ice_breaker_criteria():
+def render_full_speech_evaluation_criteria():
     st.markdown("### Evaluation Criteria (Ice Breaker)")
     st.caption("Use these descriptions to guide your 1–5 ratings.")
     for name, _desc in RUBRIC_DEF:
         st.markdown(f"**{name}**")
-        mapping = ICE_BREAKER_CRITERIA.get(name, {})
+        mapping = SPEECH_EVALUATION_CRITERIA.get(name, {})
         for score in [5, 4, 3, 2, 1]:
             if score in mapping:
                 st.markdown(f"- **{score}** — {mapping[score]}")
@@ -227,7 +228,6 @@ def render_rubric_table(rubric_def: List[Tuple[str, str]]) -> List[Dict]:
     rubric_items: List[Dict] = []
 
     with st.container(border=True):
-        # Header row
         h1, h2, h3 = st.columns([2.2, 3.2, 3.6], vertical_alignment="center")
         with h1:
             st.markdown("**Criteria**")
@@ -239,7 +239,6 @@ def render_rubric_table(rubric_def: List[Tuple[str, str]]) -> List[Dict]:
 
         st.markdown("---")
 
-        # Data rows
         for name, desc in rubric_def:
             c1, c2, c3 = st.columns([2.2, 3.2, 3.6], vertical_alignment="center")
 
@@ -251,7 +250,7 @@ def render_rubric_table(rubric_def: List[Tuple[str, str]]) -> List[Dict]:
                 rating = st.radio(
                     label=f"{name} rating",
                     options=[5, 4, 3, 2, 1],
-                    index=2,  # default 3
+                    index=2,  # ✅ default to 3
                     horizontal=True,
                     label_visibility="collapsed",
                     key=f"rubric_rating_{name}",
@@ -283,7 +282,6 @@ st.markdown(
     """
     <style>
     textarea { background-color: #EAF0FF !important; }
-    /* tighter vertical gaps */
     div[data-testid="stVerticalBlock"] > div { gap: 0.55rem; }
     </style>
     """,
@@ -347,6 +345,7 @@ if clear:
     st.session_state.crewai_output = None
     st.rerun()
 
+# Get details
 if get_details:
     level_block = extract_level_block(md_path, level)
     if not level_block:
@@ -388,7 +387,6 @@ if get_details:
 if st.session_state.details:
     d = st.session_state.details
 
-    # Project Details (narrow box)
     st.subheader("Project Details")
     left, mid, right = st.columns([1, 3, 1])
     with mid:
@@ -410,13 +408,12 @@ if st.session_state.details:
 
     st.divider()
 
-    # Rubric (official layout)
     st.subheader("Rubric Ratings (1–5)")
     st.caption("Rule: ratings 4–5 → Strengths, ratings 1–3 → Areas for improvement.")
 
     if is_ice_breaker(d["project"]):
         with st.expander("View Evaluation Criteria (Ice Breaker)"):
-            render_full_ice_breaker_criteria()
+            render_full_speech_evaluation_criteria()
 
     rubric_items = render_rubric_table(RUBRIC_DEF)
 
@@ -433,7 +430,6 @@ if st.session_state.details:
 
     st.divider()
 
-    # General Comments
     st.subheader("General Comments - By Project Speech Evaluator")
 
     l2, m2, r2 = st.columns([1, 6, 1])
