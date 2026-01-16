@@ -1,2 +1,3 @@
-# toastmasters-eval-app
-Streamlit app for Toastmasters evaluation assistant
+streamlit
+crewai
+python-dotenv
