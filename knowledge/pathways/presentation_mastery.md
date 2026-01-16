@@ -10,7 +10,7 @@ notes: "Personal knowledge base. Written in my own words."
 # Pathway: Presentation Mastery
 
 ## Level 1
-**Level focus (your words):** <Toastmasters Pathways Level 1, titled "Mastering Fundamentals," trains members in the foundational skills of public speaking, speech writing, evaluation, and providing feedback. >
+**Level focus:** "Mastering Fundamentals," trains members in the foundational skills of public speaking, speech writing, evaluation, and providing feedback.
 
 ### Project: Ice Breaker
 - **Type:** Required
