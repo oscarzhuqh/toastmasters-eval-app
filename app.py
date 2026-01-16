@@ -110,8 +110,8 @@ level = st.selectbox("Select Level", LEVELS)
 project_options = LEVEL_PROJECTS.get(level, [])
 if not project_options:
     st.warning(f"No project list configured for {level}. Add it in LEVEL_PROJECTS.")
-    available = re.findall(r"^###\s*Project:\s*(.+)\s*$", level_block, flags=re.IGNORECASE | re.MULTILINE)
-    if available:
+  available = re.findall(r"^###\s*Project:\s*(.+)\s*$", level_block, flags=re.IGNORECASE | re.MULTILINE)
+if available:
     st.caption("Projects found in this pathway + level:")
     st.write(available)
 
