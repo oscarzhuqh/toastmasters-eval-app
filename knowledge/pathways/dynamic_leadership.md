@@ -67,12 +67,8 @@ her primary style. The purpose of this speech is for the member to share the imp
 discuss leadership styles in general.
 - **Speech length**: 5–7 minutes
 
-### Project: Active Listening
+### Project: Managing Time
 - **Type:** Required
-- **Purpose**: The purpose of this project is for the member to demonstrate his or her ability to listen to what others say.
+- **Purpose**: The purpose of this project is for the member to observe his or her time management patterns.
 - **Speech length**: 5–7 minutes
 
-### Project: Writing a Speech with Purpose
-- **Type:** Required
-- **Purpose**: The purpose of this project is to learn or review basic methods for writing a speech with a defined purpose and to present a well-organized speech on any topic.
-- **Speech length**: 5–7 minutes
