@@ -1,322 +1,225 @@
-# crewai_eval.py
+"""CrewAI evaluation generator for Toastmasters Evaluation Assistant (T.E.A.).
+
+Designed to be robust:
+- Reads API key/model from env vars or Streamlit secrets.
+- Attempts to use CrewAI.
+- If CrewAI isn't available or fails due to version mismatches, falls back to a single LLM call.
+
+App expects:
+    from crewai_eval import run_crewai_eval
+"""
+
+from __future__ import annotations
+
 import os
-from typing import Any, Dict, Optional, Tuple
+import traceback
+from typing import Optional
 
-from crewai import Agent, Task, Crew, Process
 
+def _get_setting(key: str, default: str = "") -> str:
+    """Read from Streamlit secrets first (if available), else env."""
+    value = ""
 
-# -------------------- SECRETS / ENV --------------------
-def _get_secret(name: str) -> Optional[str]:
+    # Streamlit secrets (works on Streamlit Cloud and locally with .streamlit/secrets.toml)
     try:
         import streamlit as st  # type: ignore
 
-        if hasattr(st, "secrets") and name in st.secrets:
-            val = str(st.secrets[name]).strip()
-            return val or None
+        if hasattr(st, "secrets") and key in st.secrets:
+            value = str(st.secrets[key]).strip()
     except Exception:
-        return None
-    return None
+        pass
+
+    if not value:
+        value = str(os.getenv(key, default)).strip()
+
+    return value
 
 
-def _get_api_key() -> Optional[str]:
-    # Streamlit secrets first, then env
-    key = _get_secret("OPENAI_API_KEY")
-    if key:
-        return key
-    key = os.getenv("OPENAI_API_KEY", "").strip()
-    return key or None
+def _fallback_llm(prompt: str, api_key: str, model: str) -> str:
+    """Fallback using the OpenAI Python SDK (if installed)."""
+    try:
+        from openai import OpenAI  # type: ignore
 
+        client = OpenAI(api_key=api_key)
 
-def _get_model() -> str:
-    # Env first
-    model = os.getenv("OPENAI_MODEL", "").strip()
+        # Newer SDKs: Responses API
+        try:
+            resp = client.responses.create(
+                model=model,
+                input=prompt,
+            )
+            # `output_text` is a convenience on newer SDKs
+            text = getattr(resp, "output_text", None)
+            if text:
+                return str(text).strip()
+            return str(resp).strip()
+        except Exception:
+            # Older: Chat Completions API
+            chat = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a Toastmasters speech evaluation assistant.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.4,
+            )
+            return (chat.choices[0].message.content or "").strip()
 
-    # Streamlit secrets can override model
-    secret_model = _get_secret("OPENAI_MODEL")
-    if secret_model:
-        model = secret_model.strip()
-
-    return model or "gpt-4o-mini"
-
-
-def _make_llm():
-    """
-    Try CrewAI's LLM wrapper (newer versions). If unavailable, fallback to env vars.
-    """
-    api_key = _get_api_key()
-    model = _get_model()
-
-    if not api_key:
-        raise RuntimeError(
-            "OPENAI_API_KEY not found.\n\n"
-            "✅ Streamlit Cloud: App → Settings → Secrets → add:\n"
-            "OPENAI_API_KEY = \"your_key\"\n\n"
-            "OR set it as an environment variable OPENAI_API_KEY."
+    except Exception as e:
+        return (
+            "CrewAI failed and OpenAI fallback also failed.\n\n"
+            f"Fallback error: {e}\n\n"
+            "Tip: Ensure OPENAI_API_KEY is set in Streamlit secrets or environment variables."
         )
 
-    try:
-        from crewai import LLM  # type: ignore
 
-        return LLM(model=model, api_key=api_key)
-    except Exception:
-        # Fallback: rely on env vars used by underlying provider
-        os.environ["OPENAI_API_KEY"] = api_key
-        os.environ["OPENAI_MODEL"] = model
-        return None
-
-
-# -------------------- HELPERS --------------------
-def _safe_str(x: Any) -> str:
-    if x is None:
-        return ""
-    if isinstance(x, str):
-        return x.strip()
-    return str(x).strip()
-
-
-def _normalize_rubric(
-    rubric: Optional[Dict[str, Any]]
-) -> Tuple[Dict[str, Dict[str, Any]], int]:
-    """
-    Accepts multiple shapes:
-    - {"Clarity": 3, "Vocal Variety": 4}
-    - {"Clarity": {"rating": 3, "comment": "..."}, ...}
-    - {"Clarity": {"score": 3, "notes": "..."}}
-    Returns normalized:
-    - {"Clarity": {"rating": 3, "comment": "..."}}
-    And total score.
-    """
-    norm: Dict[str, Dict[str, Any]] = {}
-    total = 0
-
-    if not rubric:
-        return norm, 0
-
-    for k, v in rubric.items():
-        criterion = _safe_str(k)
-        rating = None
-        comment = ""
-
-        if isinstance(v, (int, float, str)):
-            try:
-                rating = int(v)
-            except Exception:
-                rating = None
-        elif isinstance(v, dict):
-            # common keys
-            for rk in ["rating", "score", "value"]:
-                if rk in v:
-                    try:
-                        rating = int(v[rk])
-                        break
-                    except Exception:
-                        rating = None
-            for ck in ["comment", "notes", "remark"]:
-                if ck in v and v[ck] is not None:
-                    comment = _safe_str(v[ck])
-                    break
-        else:
-            # unknown object
-            comment = _safe_str(v)
-
-        if rating is not None:
-            rating = max(1, min(5, rating))
-            total += rating
-
-        norm[criterion] = {"rating": rating, "comment": comment}
-
-    return norm, total
-
-
-def _score_band(total: int) -> str:
-    # For 8 criteria (8–40). If you later add/remove criteria, you can adjust bands.
-    if total >= 32:
-        return "Outstanding (32–40)"
-    if total >= 24:
-        return "Exceed Expectation of Speech Project (24–31)"
-    if total >= 16:
-        return "Meets Minimum Expectation of Speech Project (16–23)"
-    return "Needs Improvement (8–15)"
-
-
-def _format_rubric_lines(rubric_norm: Dict[str, Dict[str, Any]]) -> str:
-    if not rubric_norm:
-        return "- (No rubric ratings provided)"
-    lines = []
-    for c, obj in rubric_norm.items():
-        r = obj.get("rating", None)
-        com = _safe_str(obj.get("comment", ""))
-        r_txt = str(r) if r is not None else "N/A"
-        if com:
-            lines.append(f"- {c}: {r_txt}/5 — {com}")
-        else:
-            lines.append(f"- {c}: {r_txt}/5")
-    return "\n".join(lines)
-
-
-def _derive_strengths_improvements(rubric_norm: Dict[str, Dict[str, Any]]):
-    strengths = []
-    improvements = []
-    for c, obj in rubric_norm.items():
-        r = obj.get("rating", None)
-        if r is None:
-            continue
-        if r >= 4:
-            strengths.append(f"{c} ({r}/5)")
-        else:
-            improvements.append(f"{c} ({r}/5)")
-    return strengths, improvements
-
-
-# -------------------- MAIN ENTRY --------------------
 def run_crewai_eval(
-    notes,
-    pathway,
-    level,
-    project,
-    level_focus,
-    purpose,
-    speech_len,
-    # Newer optional fields (safe to ignore if your app doesn't pass them yet)
-    speaker_name: Optional[str] = None,
-    evaluator_name: Optional[str] = None,
-    meeting_date: Optional[str] = None,
-    speech_title: Optional[str] = None,
-    rubric: Optional[Dict[str, Any]] = None,
-    total_score: Optional[int] = None,
-    strengths: Optional[list] = None,
-    improvements: Optional[list] = None,
+    *,
+    notes: str,
+    pathway: str,
+    level: str,
+    project: str,
+    level_focus: str,
+    purpose: str,
+    speech_len: str,
+    criteria_text: str = "",
+    speaker_name: str = "",
+    evaluator_name: str = "",
+    meeting_date: str = "",
+    speech_title: str = "",
 ) -> str:
+    """Generate an editable evaluation draft.
+
+    Returns a single markdown string.
     """
-    Generates a structured evaluation draft using CrewAI.
 
-    Backward compatible:
-      run_crewai_eval(notes, pathway, level, project, level_focus, purpose, speech_len)
+    api_key = _get_setting("OPENAI_API_KEY", "")
+    model = _get_setting("OPENAI_MODEL", "gpt-4o-mini")
 
-    Recommended (new):
-      run_crewai_eval(..., speaker_name=..., evaluator_name=..., meeting_date=..., speech_title=...,
-                      rubric={...}, total_score=..., strengths=[...], improvements=[...])
-    """
-    llm = _make_llm()
+    if not api_key:
+        return (
+            "❌ Missing OPENAI_API_KEY.\n\n"
+            "Add it in Streamlit secrets (recommended):\n"
+            "- Streamlit Cloud: App → Settings → Secrets\n"
+            "- Local: create .streamlit/secrets.toml\n\n"
+            "Example secrets.toml:\n"
+            "OPENAI_API_KEY = \"sk-...\"\n"
+            "OPENAI_MODEL = \"gpt-4o-mini\"\n"
+        )
 
-    # Normalize rubric if provided
-    rubric_norm, computed_total = _normalize_rubric(rubric)
+    prompt = f"""
+You are the Toastmasters Evaluation Assistant (T.E.A.).
 
-    # Total score precedence: explicit total_score > computed rubric total > 0
-    final_total = total_score if isinstance(total_score, int) else computed_total
-    band = _score_band(final_total) if final_total else "N/A"
+Goal:
+Turn the evaluator's rubric ratings + rough notes into a clear, kind, and project-aligned evaluation draft.
 
-    # Derive strengths/improvements if not provided
-    if strengths is None or improvements is None:
-        s2, i2 = _derive_strengths_improvements(rubric_norm)
-        strengths = strengths or s2
-        improvements = improvements or i2
+Meeting details:
+- Speaker: {speaker_name or "(not provided)"}
+- Evaluator: {evaluator_name or "(not provided)"}
+- Date: {meeting_date or "(not provided)"}
+- Speech Title: {speech_title or "(not provided)"}
 
-    strengths_txt = "\n".join([f"- {x}" for x in strengths]) if strengths else "- (None selected)"
-    improvements_txt = "\n".join([f"- {x}" for x in improvements]) if improvements else "- (None selected)"
+Pathways context:
+- Pathway: {pathway}
+- Level: {level}
+- Project: {project}
+- Project Purpose: {purpose}
+- Level Focus: {level_focus}
+- Speech length target: {speech_len}
 
-    # Notes can be dict or string
-    if isinstance(notes, dict):
-        notes_str = "\n".join([f"- {k}: {notes.get(k)}" for k in notes.keys()])
-    else:
-        notes_str = _safe_str(notes)
+Evaluation criteria reference (for the evaluator to stay consistent):
+{criteria_text.strip() or "(No criteria text provided)"}
 
-    # Compact “criteria meaning” in our own words (not verbatim)
-    criteria_guide = (
-        "Rubric meaning (general guide):\n"
-        "- 5: Exemplary / model performance\n"
-        "- 4: Strong / above average\n"
-        "- 3: Acceptable / meets baseline\n"
-        "- 2: Developing / needs practice\n"
-        "- 1: Needs significant improvement\n"
-    )
+Evaluator input (rubric summary + comments + general notes):
+{notes}
 
-    context_block = (
-        "Toastmasters project context (from knowledge base):\n"
-        f"- Pathway: {pathway}\n"
-        f"- Level: {level}\n"
-        f"- Project: {project}\n"
-        f"- Level focus: {level_focus}\n"
-        f"- Purpose: {purpose}\n"
-        f"- Speech length: {speech_len}\n\n"
-        "Meeting details:\n"
-        f"- Speaker: {_safe_str(speaker_name) or '(not provided)'}\n"
-        f"- Evaluator: {_safe_str(evaluator_name) or '(not provided)'}\n"
-        f"- Date: {_safe_str(meeting_date) or '(not provided)'}\n"
-        f"- Speech title: {_safe_str(speech_title) or '(not provided)'}\n\n"
-        "Rubric summary:\n"
-        f"- Total score: {final_total if final_total else 'N/A'}\n"
-        f"- Band: {band}\n"
-        f"{criteria_guide}\n"
-        "Rubric ratings + comments:\n"
-        f"{_format_rubric_lines(rubric_norm)}\n\n"
-        "Auto-grouping rule:\n"
-        "- Ratings 4–5 → Strengths\n"
-        "- Ratings 1–3 → Areas for improvement\n\n"
-        "Derived groups:\n"
-        "Strengths:\n"
-        f"{strengths_txt}\n"
-        "Areas for improvement:\n"
-        f"{improvements_txt}\n\n"
-        "Evaluator rough notes (ONLY source of truth — do not invent):\n"
-        f"{notes_str if notes_str else '(no notes provided)'}\n"
-    )
+Write the output as a structured evaluation draft in plain English.
 
-    draft_agent = Agent(
-        role="Toastmasters Evaluation Drafter",
-        goal="Draft a clear, supportive, specific evaluation aligned to the project purpose and level focus, using rubric ratings and evaluator notes.",
-        backstory=(
-            "You are an experienced Toastmasters evaluator. You write constructive feedback that is "
-            "actionable, kind, and aligned to evaluation criteria. You never invent observations."
-        ),
-        allow_delegation=False,
-        verbose=False,
-        llm=llm,
-    )
+Required structure:
+1) Short opening (1-2 sentences) that references the project purpose.
+2) Strengths section (bullets) - must map back to rubric strengths.
+3) Areas for improvement (bullets) - must map back to rubric areas.
+4) One actionable challenge goal (1-2 sentences).
+5) Alignment check (3 bullets): show how the evaluation links to Purpose + Level focus.
 
-    draft_task = Task(
-        description=(
-            "Write a Toastmasters evaluation draft in MARKDOWN.\n\n"
-            "Hard rules:\n"
-            "- DO NOT invent anything not stated in rubric comments or evaluator notes.\n"
-            "- If something is not observed, omit it or say 'Not observed'.\n"
-            "- Keep tone encouraging and professional.\n\n"
-            "Output structure (use these headings):\n"
-            "## Header\n"
-            "- Speaker: <name>\n"
-            "- Evaluator: <name>\n"
-            "- Date: <date>\n"
-            "- Speech title: <title>\n"
-            "- Project: <pathway / level / project>\n"
-            "- Total score + band: <e.g., 27/40 — Exceed Expectation>\n\n"
-            "## Overall Summary (2–4 sentences)\n"
-            "- Summarise overall performance and tie back to project purpose.\n\n"
-            "## Strengths (based on ratings 4–5)\n"
-            "- Use the rubric areas rated 4–5.\n"
-            "- Include 1–2 specific evidence points from comments/notes.\n\n"
-            "## Areas for Improvement (based on ratings 1–3)\n"
-            "- Use the rubric areas rated 1–3.\n"
-            "- Keep supportive; avoid harsh wording.\n\n"
-            "## Actionable Suggestions (3–6 bullets)\n"
-            "- Practical, measurable next steps.\n\n"
-            "## To Challenge Yourself (1–3 bullets)\n"
-            "- A stretch goal aligned to the project.\n\n"
-            "## Alignment to Project Purpose (1 short paragraph)\n"
-            "- Explain how the feedback helps meet the project purpose.\n\n"
-            "CONTEXT:\n"
-            f"{context_block}"
-        ),
-        expected_output="A complete evaluation draft in Markdown with the exact structure requested.",
-        agent=draft_agent,
-    )
+Rules:
+- Be specific (use examples where available), but do not invent details.
+- If details are missing, use "Based on the notes provided..." and keep it general.
+- Keep tone supportive and Toastmasters-appropriate.
+- Output Markdown only.
+""".strip()
 
-    crew = Crew(
-        agents=[draft_agent],
-        tasks=[draft_task],
-        process=Process.sequential,
-        verbose=False,
-    )
+    # --- Try CrewAI ---
+    try:
+        from crewai import Agent, Task, Crew, Process  # type: ignore
 
-    result = crew.kickoff()
-    return str(result)
+        # Some CrewAI versions provide an LLM helper. We'll try it, but degrade gracefully.
+        llm = None
+        try:
+            from crewai import LLM  # type: ignore
 
+            llm = LLM(model=model, api_key=api_key)
+        except Exception:
+            llm = None
+
+        evaluator = Agent(
+            role="Speech Evaluator",
+            goal="Write a clear, supportive Toastmasters evaluation draft aligned to Pathways project goals.",
+            backstory="You are a seasoned Toastmasters evaluator who focuses on actionable feedback.",
+            llm=llm,  # if None, CrewAI may still read env vars
+            verbose=False,
+        )
+
+        alignment = Agent(
+            role="Alignment Checker",
+            goal="Ensure the draft explicitly aligns to Project Purpose and Level Focus.",
+            backstory="You ensure evaluations are objective, rubric-aligned, and project-relevant.",
+            llm=llm,
+            verbose=False,
+        )
+
+        draft_task = Task(
+            description=prompt,
+            expected_output="A complete markdown evaluation draft following the required structure.",
+            agent=evaluator,
+        )
+
+        check_task = Task(
+            description=(
+                "Review the evaluation draft and add/repair the 'Alignment check' section so it clearly "
+                "links to Project Purpose + Level focus. Keep everything concise and Markdown only."
+            ),
+            expected_output="The improved final markdown draft.",
+            agent=alignment,
+            context=[draft_task],
+        )
+
+        crew = Crew(
+            agents=[evaluator, alignment],
+            tasks=[draft_task, check_task],
+            process=Process.sequential,
+            verbose=False,
+        )
+
+        result = crew.kickoff()
+        # CrewAI may return a string or an object
+        if isinstance(result, str):
+            return result.strip()
+        # common attributes
+        for attr in ("raw", "output", "final_output"):
+            if hasattr(result, attr):
+                value = getattr(result, attr)
+                if value:
+                    return str(value).strip()
+        return str(result).strip()
+
+    except Exception:
+        # --- Fallback ---
+        return (
+            _fallback_llm(prompt, api_key=api_key, model=model)
+            + "\n\n---\n"
+            + "*(Note: CrewAI failed in this environment, so the app used a direct LLM fallback.)*"
+        )
