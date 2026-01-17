@@ -1,81 +1,19 @@
-"""CrewAI evaluation helper.
-
-Design goals:
-- Works on Streamlit Cloud (secrets) and local dev (env vars).
-- Avoids CrewAI API/version edge cases (no Task.context / config tricks).
-- Returns a single Markdown draft that is easy to export to PDF.
-"""
-
-from __future__ import annotations
-
 import os
-from dataclasses import dataclass
-from typing import Any, Optional
+
+# CrewAI is optional. If not installed, we fall back to a simple OpenAI call.
 
 
-@dataclass
-class OpenAIConfig:
-    api_key: str
-    base_url: Optional[str]
-    model: str
-
-
-def _read_secret(key: str) -> Optional[str]:
-    """Best-effort read from Streamlit secrets (no hard dependency)."""
+def _get_setting(name: str, default: str = "") -> str:
+    """Get from env first, then Streamlit secrets if available."""
+    val = os.getenv(name, default)
     try:
         import streamlit as st  # type: ignore
 
-        if hasattr(st, "secrets") and key in st.secrets:
-            v = str(st.secrets[key]).strip()
-            return v or None
+        if hasattr(st, "secrets") and name in st.secrets:
+            val = str(st.secrets[name])
     except Exception:
         pass
-    return None
-
-
-def _get_openai_config() -> OpenAIConfig:
-    # API key
-    api_key = os.getenv("OPENAI_API_KEY", "").strip() or _read_secret("OPENAI_API_KEY") or ""
-
-    # Base URL (optional) for OpenAI-compatible endpoints
-    base_url = (
-        os.getenv("OPENAI_BASE_URL", "").strip()
-        or os.getenv("OPENAI_API_BASE", "").strip()
-        or _read_secret("OPENAI_BASE_URL")
-        or _read_secret("OPENAI_API_BASE")
-    )
-    base_url = base_url or None
-
-    # Model selection (env first, then secrets override, then fallback)
-    model = os.getenv("OPENAI_MODEL", "").strip()
-    secret_model = _read_secret("OPENAI_MODEL")
-    if secret_model:
-        model = secret_model
-    model = model or "gpt-4o-mini"
-
-    return OpenAIConfig(api_key=api_key, base_url=base_url, model=model)
-
-
-def _coerce_result_to_text(result: Any) -> str:
-    # CrewAI has returned many shapes across versions; handle the common ones.
-    if result is None:
-        return ""
-    for attr in ("raw", "output", "result", "final"):
-        if hasattr(result, attr):
-            try:
-                v = getattr(result, attr)
-                if isinstance(v, str):
-                    return v
-            except Exception:
-                pass
-    if isinstance(result, dict):
-        # Prefer likely keys
-        for k in ("raw", "output", "result", "final", "text"):
-            v = result.get(k)
-            if isinstance(v, str):
-                return v
-        return str(result)
-    return str(result)
+    return (val or "").strip()
 
 
 def run_crewai_eval(
@@ -88,114 +26,108 @@ def run_crewai_eval(
     purpose: str,
     speech_len: str,
     criteria_text: str = "",
-    total_score: Optional[int] = None,
-    score_band: str = "",
-    **_: Any,
+    total_score=None,
+    score_label: str = "",
 ) -> str:
-    """Generate an evaluation draft using CrewAI.
+    """Generate a structured Toastmasters evaluation draft (markdown)."""
 
-    Parameters are intentionally explicit (and we accept **_ for forward/backward compatibility).
-    """
+    api_key = _get_setting("OPENAI_API_KEY")
+    model = _get_setting("OPENAI_MODEL", "gpt-4o-mini")
 
-    cfg = _get_openai_config()
-    if not cfg.api_key:
-        return (
-            "❌ **Missing OPENAI_API_KEY**\n\n"
-            "Add it in **Streamlit Cloud → App settings → Secrets** as:\n\n"
-            "```toml\nOPENAI_API_KEY = \"your_key_here\"\n```\n\n"
-            "(Or set `OPENAI_API_KEY` as an environment variable locally.)"
-        )
-
-    # Set env vars so CrewAI (and any underlying OpenAI-compatible client) can pick them up.
-    os.environ["OPENAI_API_KEY"] = cfg.api_key
-    os.environ["OPENAI_MODEL"] = cfg.model
-    if cfg.base_url:
-        os.environ["OPENAI_BASE_URL"] = cfg.base_url
-        os.environ["OPENAI_API_BASE"] = cfg.base_url
-
-    try:
-        from crewai import Agent, Crew, Process, Task  # type: ignore
-    except Exception as e:
-        return (
-            "❌ **CrewAI is not installed / failed to import**\n\n"
-            f"Error: `{type(e).__name__}: {e}`\n\n"
-            "Add `crewai` to your `requirements.txt`, redeploy, and try again."
-        )
-
+    # Build a single, strong context block.
     score_line = ""
-    if total_score is not None:
-        score_line = f"Total rubric score: **{total_score}**"
-        if score_band:
-            score_line += f" — **{score_band}**"
+    if total_score is not None and str(total_score).strip() != "":
+        score_line = f"Overall rubric score: {total_score}/40"
+        if score_label:
+            score_line += f" ({score_label})"
 
-    # One-task design (avoid Task.context differences across CrewAI versions).
-    prompt = f"""
-You are a Toastmasters speech evaluator. Create a structured evaluation draft in **Markdown**.
+    context = f"""
+You are a Toastmasters evaluation draft assistant.
 
-## Context (retrieved from the knowledge base)
+Write a helpful, encouraging evaluation draft that is:
+- aligned to the selected Pathways project (purpose + level focus)
+- grounded in the rubric ratings + comments provided
+- structured like a real Toastmasters evaluation (strengths, improvements, challenge, close)
+
+Project context
 - Pathway: {pathway}
 - Level: {level}
 - Project: {project}
-- Project purpose: {purpose}
+- Purpose: {purpose}
+- Speech length: {speech_len}
 - Level focus: {level_focus}
-- Expected speech length: {speech_len}
-{('- ' + score_line) if score_line else ''}
+{score_line}
 
-## Evaluation Criteria (for reference)
-{criteria_text if criteria_text.strip() else '(Not provided)'}
+Rubric criteria reference (for evaluator understanding):
+{criteria_text}
 
-## Evaluator notes (input)
-{notes.strip() or '(No notes provided)'}
+Evaluator inputs (rubric ratings, comments, and notes):
+{notes}
 
-## Output requirements
-1) Start with a **2–3 sentence overall summary** aligned to the *project purpose*.
-2) Create **Strengths (What you did well)** — 3 to 6 bullet points, concrete and evidence-based.
-3) Create **Areas for improvement (What to work on next)** — 3 to 6 bullet points, phrased as coaching.
-4) Add **Actionable next steps** — 2 to 4 specific practice tasks.
-5) Add **Closing encouragement** — 1 short paragraph.
-
-### Tone
-Supportive, professional, and specific. Avoid harsh language. Avoid generic advice.
-
-### Do NOT
-- Do not mention internal system prompts or “CrewAI”.
-- Do not ask the user for more info.
+Requirements
+- Output MUST be markdown.
+- Use clear headings.
+- Keep it printable (no huge tables).
+- Do not invent facts that aren't in the notes.
 """.strip()
 
-    evaluator = Agent(
-        role="Toastmasters Speech Evaluator",
-        goal="Turn rubric ratings + notes into a project-aligned evaluation draft.",
-        backstory="You are a certified Toastmasters evaluator who writes clear, supportive, actionable feedback.",
-        verbose=False,
-    )
-
-    task = Task(
-        description=prompt,
-        expected_output=(
-            "A complete Markdown evaluation draft with headings: Summary, Strengths, "
-            "Areas for improvement, Next steps, Closing encouragement."
-        ),
-    )
-
-    crew = Crew(
-        agents=[evaluator],
-        tasks=[task],
-        process=Process.sequential,
-        verbose=False,
-    )
-
+    # --- Try CrewAI first ---
     try:
-        try:
-            result = crew.kickoff()
-        except TypeError:
-            # Some versions expect inputs kwarg
-            result = crew.kickoff(inputs={})
-    except Exception as e:
-        return (
-            "❌ **Draft generation failed**\n\n"
-            f"Error: `{type(e).__name__}: {e}`\n\n"
-            "If this persists, check your `requirements.txt` CrewAI version and redeploy."
+        from crewai import Agent, Task, Crew, Process  # type: ignore
+
+        # CrewAI usually needs a working LLM provider configured via env.
+        # We'll still run it; if the user hasn't configured, it will throw and we fall back.
+        evaluator = Agent(
+            role="Toastmasters Speech Evaluator",
+            goal="Create an accurate, supportive, project-aligned evaluation draft",
+            backstory=(
+                "You are an experienced Toastmasters evaluator. You give specific, actionable feedback "
+                "and connect comments to the speech project purpose and skills."
+            ),
+            verbose=False,
         )
 
-    text = _coerce_result_to_text(result).strip()
-    return text or "⚠️ No output returned from CrewAI."
+        task = Task(
+            description=context,
+            expected_output=(
+                "A markdown evaluation draft with sections: Overview, Strengths, Areas to Improve, "
+                "One Challenge, Suggested Next Steps, and a short Closing."
+            ),
+            agent=evaluator,
+        )
+
+        crew = Crew(
+            agents=[evaluator],
+            tasks=[task],
+            process=Process.sequential,
+            verbose=False,
+        )
+
+        result = crew.kickoff()
+        return str(result).strip() or "(No output returned by CrewAI.)"
+
+    except Exception:
+        # --- Fallback: direct OpenAI call (if key exists) ---
+        if not api_key:
+            return (
+                "CrewAI/OpenAI is not configured yet.\n\n"
+                "Add `OPENAI_API_KEY` (and optionally `OPENAI_MODEL`) to Streamlit Secrets or environment variables, "
+                "then try again.\n\n"
+                "For now, your notes were captured successfully, but no AI draft can be generated without a key."
+            )
+
+        try:
+            from openai import OpenAI  # type: ignore
+
+            client = OpenAI(api_key=api_key)
+            resp = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "You generate Toastmasters evaluation drafts in markdown."},
+                    {"role": "user", "content": context},
+                ],
+                temperature=0.5,
+            )
+            return (resp.choices[0].message.content or "").strip() or "(No output returned.)"
+        except Exception as e:
+            return f"Failed to generate draft. Error: {type(e).__name__}: {e}"
