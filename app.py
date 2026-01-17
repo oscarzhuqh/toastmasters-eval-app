@@ -276,7 +276,7 @@ def render_rubric_table(rubric_def: List[Tuple[str, str]]) -> List[Dict]:
 
 
 # -------------------- UI --------------------
-st.set_page_config(page_title="Toastmasters Evaluation Asssistant T.E.A.", page_icon="☕", layout="centered")
+st.set_page_config(page_title="Toastmasters Evaluation Application", page_icon="☕", layout="centered")
 
 st.markdown(
     """
@@ -300,21 +300,20 @@ with h1:
     if logo_path:
         st.image(str(logo_path), use_container_width=True)
 with h2:
-    st.markdown("# Toastmasters Evaluation Assistant T.E.A.")
-    st.caption("Objective of T.E.A. is to help speech evaluators turn rubric ratings + rough notes into a structured, project-aligned evaluation draft, by retrieving the selected Pathways project purpose/level focus from a local knowledge base and using CrewAI to generate an editable evaluation.")
-    st.caption("NYP ITI123 Appplication Development Project by Zhu Qihui, Oscar 9801937V")
+    st.markdown("# Toastmasters Evaluation Application")
+    st.caption("T.E.A. — Toastmasters Evaluation Assistant")
 
 st.divider()
 
-# Chapter Meeting details
-st.subheader("Chapter Meeting Details")
+# Meeting details
+st.subheader("Meeting Details")
 c1, c2, c3 = st.columns(3)
 with c1:
-    speaker_name = st.text_input("Speaker Name", placeholder="e.g., Oscar Zhu")
+    speaker_name = st.text_input("Speaker Name", placeholder="e.g., Alex Tan")
 with c2:
-    evaluator_name = st.text_input("Evaluator Name", placeholder="e.g., Lee Ching Yuh")
+    evaluator_name = st.text_input("Evaluator Name", placeholder="e.g., Oscar Zhu")
 with c3:
-    meeting_date = st.date_input("Date of Chapter Meeting")
+    meeting_date = st.date_input("Date of Meeting")
 
 st.divider()
 
@@ -493,4 +492,3 @@ To challenge yourself:
                 st.write(st.session_state.crewai_output)
 
 st.caption(f"Using file: {md_path}")
-
