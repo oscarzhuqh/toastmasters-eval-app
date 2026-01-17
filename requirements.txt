@@ -1,4 +1,4 @@
 streamlit
 crewai
-python-dotenv
-reportlab
+openai
+reportlab>=4.0
