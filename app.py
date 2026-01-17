@@ -633,14 +633,16 @@ if st.session_state.page == "draft_loading":
     else:
         with st.spinner("Running CrewAI…"):
             output = run_crewai_eval(
-                notes=pending["notes"],
-                pathway=pending["pathway"],
-                level=pending["level"],
-                project=pending["project"],
-                level_focus=pending["level_focus"],
-                purpose=pending["purpose"],
-                speech_len=pending["speech_len"],
-                selected_criteria_text=pending.get("selected_criteria_text", ""),
+                notes=pending.get("notes_payload", ""),
+                pathway=pending.get("pathway", ""),
+                level=pending.get("level", ""),
+                project=pending.get("project", ""),
+                level_focus=pending.get("level_focus", ""),
+                purpose=pending.get("purpose", ""),
+                speech_len=pending.get("speech_len", ""),
+                criteria_text=pending.get("criteria_text", ""),
+                total_score=pending.get("total_score"),
+                score_label=pending.get("score_label", ""),
             )
 
     st.session_state.crewai_output = output
@@ -948,14 +950,20 @@ To challenge yourself:
                 st.warning("Please add at least one rubric comment OR fill one general comment box before generating.")
             else:
                 # Save payload and navigate to a fresh Draft page.
+                # Everything Step 4 needs (use `.get()` when reading to avoid KeyError)
                 st.session_state.pending_generation = {
                     "notes_payload": notes_payload,
-                    "pathway": d["pathway"],
-                    "level": d["level"],
-                    "project": d["project"],
-                    "level_focus": d["level_focus"],
-                    "purpose": d["purpose"],
-                    "speech_len": d["speech_len"],
+                    "pathway": d.get("pathway", ""),
+                    "level": d.get("level", ""),
+                    "project": d.get("project", ""),
+                    "level_focus": d.get("level_focus", ""),
+                    "purpose": d.get("purpose", ""),
+                    "speech_len": d.get("speech_len", ""),
+                    # Extra context to strengthen the CrewAI prompt
+                    "criteria_text": selected_criteria_text,
+                    "total_score": total_score,
+                    "max_score": max_score,
+                    "score_band": label,
                 }
                 st.session_state.crewai_output = None
                 st.session_state.page = "draft_loading"
