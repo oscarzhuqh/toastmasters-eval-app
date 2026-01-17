@@ -56,3 +56,42 @@ notes: "Personal knowledge base. Written in my own words."
 discuss leadership styles in general.
 - **Speech length**: 5–7 minutes
 
+## Level 3
+**Level focus:**: Toastmasters Level 3 focuses on deepening specific path skills, moving beyond foundational speeches to tackle more complex projects like persuasive speaking, storytelling, or negotiation, requiring one core project and at least two electives to build expertise in areas like leadership, communication, or innovation, while also serving as a mentor or fulfilling other meeting roles. The key is increasing knowledge and applying specialized skills relevant to your chosen path's focus, such as building a proposal, delivering social speeches, or developing leadership strategies. 
+
+### Project: Understanding Conflict Resolution
+- **Type:** Required
+- **Purpose**: The purpose of this project is for the member to develop or enhance his or her understanding of the steps
+and strategies to address conflict. The purpose of this speech is for the member to share some aspect of his or her experience learning about and/or resolving conflict.
+- **Speech length**: 5–7 minutes
+
+## Level 4
+**Level focus:**: Toastmasters Pathways Level 4 focuses on building specialized skills and applying learned techniques to real-world situations. At this stage, members move beyond foundational public speaking to develop more advanced, path-specific leadership and communication competencies, such as managing change, coaching, or advanced networking.  
+
+### Project: Leading in Difficult Situations
+- **Type:** Required
+- **Purpose**: The purpose of this project is for the member to practice strategies for adjusting to unexpected changes to a
+finalized plan.
+- **Speech length**: 5–7 minutes prepared speech AND 5-10 minutes for impromptu responses
+
+## Level 5
+**Level focus:**: Toastmasters Pathways Level 5 focuses on Demonstrating Expertise, marking the final stage of a path where members apply accumulated skills to high-level leadership and communication projects. This level emphasizes mastery, requiring members to take on complex, real-world tasks, often involving long-term projects and providing strategic, expert-level feedback. 
+
+### Project: High Performance Leadership - First Speech
+- **Type:** Required
+- **Purpose**: The purpose of this project is for the member to apply his or her leadership and planning knowledge to
+develop a project plan, organize a guidance committee, and implement the plan with the help of a team. The purpose of the first speech is for the member to introduce his or her plan and vision.
+- **Speech length**: 5–7 minutes
+
+### Project: High Performance Leadership - Second Speech
+- **Type:** Required
+- **Purpose**: The purpose of this project is for the member to apply his or her leadership and planning knowledge to
+develop a project plan, organize a guidance committee, and implement the plan with the help of a team. The purpose of the second speech is for the member to share some aspect of his or her experience completing the project.
+- **Speech length**: 5–7 minutes
+
+### Project: Reflect on Your Path
+- **Type:** Required
+- **Purpose**: The purpose of this project is for the member to reflect on his or her growth during the completion of an entire path. The purpose of the speech is for the member to share some aspect of his or her growth during the completion
+of a path.
+- **Speech length**: 10–12 minutes
+
