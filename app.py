@@ -1,11 +1,17 @@
 import time
 import re
 from pathlib import Path
-from typing import Optional, List, Dict, Tuple
 
 import streamlit as st
 
-from crewai_eval import run_crewai_eval
+# --- CrewAI import (safe) ---
+try:
+    from crewai_eval import run_crewai_eval
+except Exception as e:
+    run_crewai_eval = None
+    CREWAI_IMPORT_ERROR = str(e)
+else:
+    CREWAI_IMPORT_ERROR = ""
 
 
 # ==================== CONFIG ====================
@@ -30,7 +36,7 @@ LOGO_CANDIDATES = [
 ]
 
 # ==================== EVALUATION CRITERIA (Ice Breaker) ====================
-SPEECH_EVALUATION_CRITERIA: Dict[str, Dict[int, str]] = {
+SPEECH_EVALUATION_CRITERIA = {
     "Clarity": {
         5: "Is an exemplary public speaker who is always understood.",
         4: "Excels at communicating using the spoken word.",
@@ -83,7 +89,7 @@ SPEECH_EVALUATION_CRITERIA: Dict[str, Dict[int, str]] = {
     "Well Supported": {
         5: "Delivers exemplary speech with a topic that is well-supported by content of the speech.",
         4: "Delivers excellent speech with a topic that is well-supported by content of the speech.",
-        3: "Speech is excellent with a topic that is well-supported by content of the speech.",
+        3: "Speech is supported by the content of the speech.",
         2: "Speech contains content that supports the topic though some content may seem disconnected.",
         1: "Speech content is unrelated to the topic of the speech.",
     },
@@ -101,8 +107,41 @@ RUBRIC_DEF = [
 ]
 
 
+# ==================== SESSION STATE (router) ====================
+if "page" not in st.session_state:
+    st.session_state.page = "select"  # select | loading | evaluation
+
+if "details" not in st.session_state:
+    st.session_state.details = None
+
+if "crewai_output" not in st.session_state:
+    st.session_state.crewai_output = None
+
+if "meeting" not in st.session_state:
+    st.session_state.meeting = {"speaker": "", "evaluator": "", "date": None}
+
+
+# ==================== UI SETUP ====================
+st.set_page_config(
+    page_title="Toastmasters Evaluation Assistant T.E.A.",
+    page_icon="☕",
+    layout="centered",
+)
+
+st.markdown(
+    """
+    <style>
+      textarea { background-color: #EAF0FF !important; }
+      .stRadio > div { padding-top: 0.1rem; }
+      div[data-testid="stVerticalBlock"] > div { gap: 0.55rem; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
 # ==================== HELPERS ====================
-def find_logo_path() -> Optional[Path]:
+def find_logo_path():
     for p in LOGO_CANDIDATES:
         if p.exists():
             return p
@@ -114,24 +153,30 @@ def resolve_md_path(pathway_label: str) -> Path:
     if expected.exists():
         return expected
 
-    alt1 = KB_DIR / (pathway_label.lower().replace(" ", "_") + ".md")
-    if alt1.exists():
-        return alt1
+    # some users renamed files (e.g., Engaging Humor.md)
+    alt_title = KB_DIR / f"{pathway_label}.md"
+    if alt_title.exists():
+        return alt_title
 
-    alt2 = KB_DIR / (pathway_label + ".md")
-    if alt2.exists():
-        return alt2
+    # fallback: snake_case
+    alt_snake = KB_DIR / (pathway_label.lower().replace(" ", "_") + ".md")
+    if alt_snake.exists():
+        return alt_snake
 
     return expected
 
 
-def extract_level_block(md_path: Path, level: str) -> Optional[str]:
+def extract_level_block(md_path: Path, level: str):
     if not md_path.exists():
         return None
+
     lines = md_path.read_text(encoding="utf-8").splitlines()
     level_header = f"## {level}"
 
-    level_start = next((i for i, line in enumerate(lines) if line.strip().lower() == level_header.lower()), None)
+    level_start = next(
+        (i for i, line in enumerate(lines) if line.strip().lower() == level_header.lower()),
+        None,
+    )
     if level_start is None:
         return None
 
@@ -142,17 +187,22 @@ def extract_level_block(md_path: Path, level: str) -> Optional[str]:
     return "\n".join(lines[level_start:level_end])
 
 
-def extract_level_focus(level_block: str) -> Optional[str]:
+def extract_level_focus(level_block: str):
     m = re.search(r"\*\*Level focus.*?\*\*\s*:?\s*(.+)", level_block, flags=re.IGNORECASE)
     return m.group(1).strip() if m else None
 
 
-def get_projects_from_markdown(md_path: Path, level: str) -> List[str]:
+def get_projects_from_markdown(md_path: Path, level: str):
     level_block = extract_level_block(md_path, level)
     if not level_block:
         return []
-    projects = re.findall(r"^###\s*Project:\s*(.+)\s*$", level_block, flags=re.IGNORECASE | re.MULTILINE)
-    # dedupe
+    projects = re.findall(
+        r"^###\s*Project:\s*(.+)\s*$",
+        level_block,
+        flags=re.IGNORECASE | re.MULTILINE,
+    )
+
+    # de-dup + clean
     out, seen = [], set()
     for p in projects:
         p2 = p.strip()
@@ -162,19 +212,25 @@ def get_projects_from_markdown(md_path: Path, level: str) -> List[str]:
     return out
 
 
-def extract_project_block(level_block: str, project: str) -> Optional[str]:
+def extract_project_block(level_block: str, project: str):
     lines = level_block.splitlines()
     project_header = f"### Project: {project}"
 
-    proj_start = next((i for i, line in enumerate(lines) if line.strip().lower() == project_header.lower()), None)
+    proj_start = next(
+        (i for i, line in enumerate(lines) if line.strip().lower() == project_header.lower()),
+        None,
+    )
     if proj_start is None:
         return None
 
-    proj_end = next((i for i in range(proj_start + 1, len(lines)) if lines[i].strip().startswith("### Project:")), len(lines))
+    proj_end = next(
+        (i for i in range(proj_start + 1, len(lines)) if lines[i].strip().startswith("### Project:")),
+        len(lines),
+    )
     return "\n".join(lines[proj_start:proj_end])
 
 
-def extract_field(proj_block: str, field_name: str) -> Optional[str]:
+def extract_field(proj_block: str, field_name: str):
     pattern = rf"-\s*\*\*{re.escape(field_name)}.*?\*\*?\s*:?\s*(.+)"
     m = re.search(pattern, proj_block, flags=re.IGNORECASE)
     return m.group(1).strip() if m else None
@@ -184,38 +240,7 @@ def is_ice_breaker(project: str) -> bool:
     return project.strip().lower() == "ice breaker"
 
 
-def build_rubric_summary(rubric_items: List[Dict]) -> Tuple[str, str]:
-    strengths, improvements = [], []
-    for item in rubric_items:
-        name = item["name"]
-        rating = int(item["rating"])
-        comment = (item.get("comment") or "").strip()
-        line = f"- {name} ({rating}/5): {comment}" if comment else f"- {name} ({rating}/5)"
-        if rating >= 4:
-            strengths.append(line)
-        else:
-            improvements.append(line)
-    strengths_text = "\n".join(strengths) if strengths else "- (none selected)"
-    improvements_text = "\n".join(improvements) if improvements else "- (none selected)"
-    return strengths_text, improvements_text
-
-
-def build_selected_criteria_text(project: str, rubric_items: List[Dict]) -> str:
-    if not is_ice_breaker(project):
-        return ""
-    lines = ["Evaluation criteria meaning (Ice Breaker):"]
-    for item in rubric_items:
-        name = item["name"]
-        rating = int(item["rating"])
-        desc = SPEECH_EVALUATION_CRITERIA.get(name, {}).get(rating, "")
-        if desc:
-            lines.append(f"- {name} {rating}/5: {desc}")
-        else:
-            lines.append(f"- {name} {rating}/5")
-    return "\n".join(lines)
-
-
-def render_full_speech_evaluation_criteria():
+def render_full_ice_breaker_criteria():
     st.markdown("### Evaluation Criteria (Ice Breaker)")
     st.caption("Use these descriptions to guide your 1–5 ratings.")
     for name, _ in RUBRIC_DEF:
@@ -227,13 +252,13 @@ def render_full_speech_evaluation_criteria():
         st.markdown("---")
 
 
-def render_rubric_table(rubric_def: List[Tuple[str, str]]) -> List[Dict]:
+def render_rubric_table(rubric_def):
     """
     Official-sheet-like row layout:
       [Criteria] | [5 4 3 2 1] | [Comment box]
     Default rating is 3.
     """
-    rubric_items: List[Dict] = []
+    rubric_items = []
 
     with st.container(border=True):
         h1, h2, h3 = st.columns([2.2, 3.2, 3.6], vertical_alignment="center")
@@ -249,6 +274,7 @@ def render_rubric_table(rubric_def: List[Tuple[str, str]]) -> List[Dict]:
 
         for name, desc in rubric_def:
             c1, c2, c3 = st.columns([2.2, 3.2, 3.6], vertical_alignment="center")
+
             with c1:
                 st.markdown(f"**{name}**")
                 st.caption(desc)
@@ -257,7 +283,7 @@ def render_rubric_table(rubric_def: List[Tuple[str, str]]) -> List[Dict]:
                 rating = st.radio(
                     label=f"{name} rating",
                     options=[5, 4, 3, 2, 1],
-                    index=2,  # default=3 ✅
+                    index=2,  # ✅ default = 3
                     horizontal=True,
                     label_visibility="collapsed",
                     key=f"rubric_rating_{name}",
@@ -272,43 +298,51 @@ def render_rubric_table(rubric_def: List[Tuple[str, str]]) -> List[Dict]:
                     key=f"rubric_comment_{name}",
                 )
 
-            rubric_items.append({"name": name, "rating": rating, "comment": comment})
-            st.markdown("<hr style='margin:0.35rem 0; border:0; border-top:1px solid #eee;'>", unsafe_allow_html=True)
+            rubric_items.append({"name": name, "rating": int(rating), "comment": comment})
+
+            st.markdown(
+                "<hr style='margin:0.35rem 0; border:0; border-top:1px solid #eee;'>",
+                unsafe_allow_html=True,
+            )
 
     return rubric_items
 
 
-# ==================== PAGE ROUTER STATE ====================
-if "page" not in st.session_state:
-    st.session_state.page = "select"  # select | loading | evaluation
+def build_rubric_summary(rubric_items):
+    strengths, improvements = [], []
+    for item in rubric_items:
+        name = item["name"]
+        rating = int(item["rating"])
+        comment = (item.get("comment") or "").strip()
 
-if "details" not in st.session_state:
-    st.session_state.details = None
+        line = f"- {name} ({rating}/5): {comment}" if comment else f"- {name} ({rating}/5)"
+        if rating >= 4:
+            strengths.append(line)
+        else:
+            improvements.append(line)
 
-if "crewai_output" not in st.session_state:
-    st.session_state.crewai_output = None
-
-if "meeting" not in st.session_state:
-    st.session_state.meeting = {"speaker": "", "evaluator": "", "date": None}
+    strengths_text = "\n".join(strengths) if strengths else "- (none selected)"
+    improvements_text = "\n".join(improvements) if improvements else "- (none selected)"
+    return strengths_text, improvements_text
 
 
-# ==================== UI SETUP ====================
-st.set_page_config(page_title="Toastmasters Evaluation Assistant T.E.A.", page_icon="☕", layout="centered")
-
-st.markdown(
-    """
-    <style>
-    textarea { background-color: #EAF0FF !important; }
-    div[data-testid="stVerticalBlock"] > div { gap: 0.55rem; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-logo_path = find_logo_path()
+def build_selected_criteria_text(project: str, rubric_items):
+    if not is_ice_breaker(project):
+        return ""
+    lines = ["Evaluation criteria meaning (Ice Breaker):"]
+    for item in rubric_items:
+        name = item["name"]
+        rating = int(item["rating"])
+        desc = SPEECH_EVALUATION_CRITERIA.get(name, {}).get(rating, "")
+        if desc:
+            lines.append(f"- {name} {rating}/5: {desc}")
+        else:
+            lines.append(f"- {name} {rating}/5")
+    return "\n".join(lines)
 
 
 def render_header():
+    logo_path = find_logo_path()
     h1, h2 = st.columns([1, 5], vertical_alignment="center")
     with h1:
         if logo_path:
@@ -323,21 +357,53 @@ def render_header():
         st.caption("NYP ITI123 Application Development Project by Zhu Qihui, Oscar 9801937V")
 
 
+def render_step_indicator():
+    page = st.session_state.get("page", "select")
+    steps = [
+        ("Step 1/3", "Select Project Details", "select"),
+        ("Step 2/3", "Loading", "loading"),
+        ("Step 3/3", "Evaluation Form", "evaluation"),
+    ]
+    page_to_idx = {"select": 0, "loading": 1, "evaluation": 2}
+    idx = page_to_idx.get(page, 0)
+
+    a, b, c = st.columns(3)
+    cols = [a, b, c]
+    for i, (label, name, _) in enumerate(steps):
+        with cols[i]:
+            if i == idx:
+                st.markdown(f"**✅ {label}**  \n{name}")
+            elif i < idx:
+                st.markdown(f"**✔ {label}**  \n{name}")
+            else:
+                st.markdown(f"**◻ {label}**  \n{name}")
+
+    st.progress((idx + 1) / 3)
+
+
 # ==================== PAGE 1: SELECT ====================
 if st.session_state.page == "select":
     render_header()
+    render_step_indicator()
     st.divider()
 
     st.subheader("Chapter Meeting Details")
     c1, c2, c3 = st.columns(3)
     with c1:
-        speaker_name = st.text_input("Speaker Name", value=st.session_state.meeting.get("speaker", ""), placeholder="e.g., Oscar Zhu")
+        speaker_name = st.text_input(
+            "Speaker Name",
+            value=st.session_state.meeting.get("speaker", ""),
+            placeholder="e.g., Oscar Zhu",
+        )
     with c2:
-        evaluator_name = st.text_input("Evaluator Name", value=st.session_state.meeting.get("evaluator", ""), placeholder="e.g., Lee Ching Yuh")
+        evaluator_name = st.text_input(
+            "Evaluator Name",
+            value=st.session_state.meeting.get("evaluator", ""),
+            placeholder="e.g., Lee Ching Yuh",
+        )
     with c3:
         meeting_date = st.date_input("Date of Chapter Meeting", value=st.session_state.meeting.get("date"))
 
-    # persist meeting details
     st.session_state.meeting = {"speaker": speaker_name, "evaluator": evaluator_name, "date": meeting_date}
 
     st.divider()
@@ -371,7 +437,6 @@ if st.session_state.page == "select":
         st.rerun()
 
     if get_details:
-        # parse details and store
         level_block = extract_level_block(md_path, level)
         if not level_block:
             st.error(f"❌ Level '{level}' not found in {md_path.name}.")
@@ -409,24 +474,24 @@ if st.session_state.page == "select":
         }
         st.session_state.crewai_output = None
 
-        # ✅ go to loading page then evaluation page
         st.session_state.page = "loading"
         st.rerun()
 
     st.caption(f"Using file: {md_path}")
-    st.stop()  # ✅ IMPORTANT: prevents rubric/comments rendering on the same page
+    st.stop()  # ✅ prevents anything else rendering below this page
 
 
 # ==================== PAGE 2: LOADING ====================
 elif st.session_state.page == "loading":
     render_header()
+    render_step_indicator()
     st.divider()
 
     st.subheader("Loading project details…")
     st.caption("Please wait while we prepare the evaluation form.")
     bar = st.progress(0)
 
-    # ≥ 3 seconds
+    # >= 3 seconds
     for i in range(101):
         bar.progress(i)
         time.sleep(0.03)
@@ -442,6 +507,7 @@ elif st.session_state.page == "evaluation":
         st.rerun()
 
     render_header()
+    render_step_indicator()
     st.divider()
 
     top1, top2, top3 = st.columns([1, 1, 2])
@@ -461,6 +527,7 @@ elif st.session_state.page == "evaluation":
     meeting_date = meeting.get("date")
     meeting_date_str = str(meeting_date) if meeting_date else "N/A"
 
+    # ---- Project Details (narrow centered box) ----
     st.subheader("Project Details")
     left, mid, right = st.columns([1, 3, 1])
     with mid:
@@ -482,12 +549,13 @@ elif st.session_state.page == "evaluation":
 
     st.divider()
 
+    # ---- Rubrics ----
     st.subheader("Rubric Ratings (1–5)")
     st.caption("Rule: ratings 4–5 → Strengths, ratings 1–3 → Areas for improvement.")
 
     if is_ice_breaker(d["project"]):
         with st.expander("View Evaluation Criteria (Ice Breaker)"):
-            render_full_speech_evaluation_criteria()
+            render_full_ice_breaker_criteria()
 
     rubric_items = render_rubric_table(RUBRIC_DEF)
     strengths_text, improvements_text = build_rubric_summary(rubric_items)
@@ -503,6 +571,7 @@ elif st.session_state.page == "evaluation":
 
     st.divider()
 
+    # ---- General comments ----
     st.subheader("General Comments - By Project Speech Evaluator")
     l2, m2, r2 = st.columns([1, 6, 1])
     with m2:
@@ -514,6 +583,7 @@ elif st.session_state.page == "evaluation":
 
         challenge = st.text_area("🎯 To challenge yourself:", height=140)
 
+        # ---- Compose notes payload for CrewAI ----
         notes_payload = f"""
 Meeting details:
 - Speaker: {meeting.get("speaker") or "N/A"}
@@ -552,24 +622,31 @@ To challenge yourself:
 {challenge}
 """.strip()
 
+        # ---- CrewAI button ----
         if st.button("Generate Evaluation Draft (CrewAI)"):
-            has_general = (excelled.strip() or work_on.strip() or challenge.strip())
-            has_any_rubric_comment = any((x.get("comment") or "").strip() for x in rubric_items)
-            if not has_general and not has_any_rubric_comment:
-                st.warning("Please add at least one rubric comment or fill one general comment box before generating.")
+            if run_crewai_eval is None:
+                st.error("CrewAI module failed to import.")
+                st.code(CREWAI_IMPORT_ERROR)
             else:
-                with st.spinner("Generating evaluation draft..."):
-                    output = run_crewai_eval(
-                        notes=notes_payload,
-                        pathway=d["pathway"],
-                        level=d["level"],
-                        project=d["project"],
-                        level_focus=d["level_focus"],
-                        purpose=d["purpose"],
-                        speech_len=d["speech_len"],
-                    )
-                st.session_state.crewai_output = output
+                has_general = (excelled.strip() or work_on.strip() or challenge.strip())
+                has_any_rubric_comment = any((x.get("comment") or "").strip() for x in rubric_items)
 
+                if not has_general and not has_any_rubric_comment:
+                    st.warning("Please add at least one rubric comment OR fill one general comment box before generating.")
+                else:
+                    with st.spinner("Generating evaluation draft..."):
+                        output = run_crewai_eval(
+                            notes=notes_payload,
+                            pathway=d["pathway"],
+                            level=d["level"],
+                            project=d["project"],
+                            level_focus=d["level_focus"],
+                            purpose=d["purpose"],
+                            speech_len=d["speech_len"],
+                        )
+                    st.session_state.crewai_output = output
+
+        # ---- Output ----
         if st.session_state.crewai_output:
             st.divider()
             st.subheader("CrewAI Output")
