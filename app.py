@@ -334,13 +334,13 @@ def compute_total_score(rubric_items):
 
 def overall_band(total_score):
     # For 8 criteria (max 40). If you add/remove criteria later, you can adjust these thresholds.
-    if total_score >= 32:
-        return "Outstanding", "success"
-    if total_score >= 24:
-        return "Exceed Expectation of Speech Project", "info"
-    if total_score >= 16:
-        return "Meets Minimum Expectation of Speech Project", "warning"
-    return "Needs Improvement", "error"
+    if total_score >= 36:
+        return "Outstanding (Exceptional/Superior)", "success"
+    if total_score >= 28:
+        return "Proficient (Expertise/Mastery)", "info"
+    if total_score >= 20:
+        return " Competent (Meets Standard)", "warning"
+    return "Needs Improvement (Below Standard)", "error"
 
 
 def build_selected_criteria_text(project: str, rubric_items):
@@ -580,7 +580,7 @@ if st.session_state.page == "evaluation":
     total_score = compute_total_score(rubric_items)
     max_score = len(rubric_items) * 5
 
-    st.subheader("Total Accumulated Score")
+    st.subheader("Speaker's Competency Total Accumulated Score")
     cA, cB = st.columns([1.2, 2.8], vertical_alignment="center")
     with cA:
         st.metric("Total Score", f"{total_score} / {max_score}")
