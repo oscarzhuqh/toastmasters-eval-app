@@ -95,7 +95,6 @@ SPEECH_EVALUATION_CRITERIA = {
     },
 }
 
-# Rubric rows (as per your sheet)
 RUBRIC_DEF = [
     ("Clarity", "Spoken language is clear and is easily understood"),
     ("Vocal Variety", "Uses tone, speed, and volume as tools"),
@@ -133,9 +132,8 @@ st.markdown(
     """
     <style>
       textarea { background-color: #EAF0FF !important; }
+      .stRadio > div { padding-top: 0.1rem; }
       div[data-testid="stVerticalBlock"] > div { gap: 0.55rem; }
-      /* Make the central project-details box feel less wide */
-      .tea-narrow { max-width: 680px; margin: 0 auto; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -155,12 +153,12 @@ def resolve_md_path(pathway_label: str) -> Path:
     if expected.exists():
         return expected
 
-    # If user renamed to Title.md (e.g., "Engaging Humor.md")
+    # some users renamed files (e.g., Engaging Humor.md)
     alt_title = KB_DIR / f"{pathway_label}.md"
     if alt_title.exists():
         return alt_title
 
-    # snake_case fallback
+    # fallback: snake_case
     alt_snake = KB_DIR / (pathway_label.lower().replace(" ", "_") + ".md")
     if alt_snake.exists():
         return alt_snake
@@ -198,13 +196,13 @@ def get_projects_from_markdown(md_path: Path, level: str):
     level_block = extract_level_block(md_path, level)
     if not level_block:
         return []
-
     projects = re.findall(
         r"^###\s*Project:\s*(.+)\s*$",
         level_block,
         flags=re.IGNORECASE | re.MULTILINE,
     )
 
+    # de-dup + clean
     out, seen = [], set()
     for p in projects:
         p2 = p.strip()
@@ -258,7 +256,7 @@ def render_rubric_table(rubric_def):
     """
     Official-sheet-like row layout:
       [Criteria] | [5 4 3 2 1] | [Comment box]
-    Default rating = 3.
+    Default rating is 3.
     """
     rubric_items = []
 
@@ -326,21 +324,6 @@ def build_rubric_summary(rubric_items):
     strengths_text = "\n".join(strengths) if strengths else "- (none selected)"
     improvements_text = "\n".join(improvements) if improvements else "- (none selected)"
     return strengths_text, improvements_text
-
-
-def compute_total_score(rubric_items):
-    return sum(int(x.get("rating", 0)) for x in rubric_items)
-
-
-def overall_band(total_score):
-    # For 8 criteria (max 40). If you add/remove criteria later, you can adjust these thresholds.
-    if total_score >= 36:
-        return "Outstanding (Exceptional/Superior)", "success"
-    if total_score >= 28:
-        return "Proficient (Expertise/Mastery)", "info"
-    if total_score >= 20:
-        return " Competent (Meets Standard)", "warning"
-    return "Needs Improvement (Below Standard)", "error"
 
 
 def build_selected_criteria_text(project: str, rubric_items):
@@ -495,11 +478,11 @@ if st.session_state.page == "select":
         st.rerun()
 
     st.caption(f"Using file: {md_path}")
-    st.stop()
+    st.stop()  # ✅ prevents anything else rendering below this page
 
 
 # ==================== PAGE 2: LOADING ====================
-if st.session_state.page == "loading":
+elif st.session_state.page == "loading":
     render_header()
     render_step_indicator()
     st.divider()
@@ -518,7 +501,7 @@ if st.session_state.page == "loading":
 
 
 # ==================== PAGE 3: EVALUATION ====================
-if st.session_state.page == "evaluation":
+elif st.session_state.page == "evaluation":
     if not st.session_state.details:
         st.session_state.page = "select"
         st.rerun()
@@ -546,23 +529,23 @@ if st.session_state.page == "evaluation":
 
     # ---- Project Details (narrow centered box) ----
     st.subheader("Project Details")
-    st.markdown('<div class="tea-narrow">', unsafe_allow_html=True)
-    with st.container(border=True):
-        st.markdown("**Pathway**")
-        st.write(d["pathway"])
+    left, mid, right = st.columns([1, 3, 1])
+    with mid:
+        with st.container(border=True):
+            st.markdown("**Pathway**")
+            st.write(d["pathway"])
 
-        st.markdown("---")
-        st.markdown("**Level focus**")
-        st.write(d["level_focus"])
+            st.markdown("---")
+            st.markdown("**Level focus**")
+            st.write(d["level_focus"])
 
-        st.markdown("---")
-        st.markdown("**Purpose**")
-        st.write(d["purpose"])
+            st.markdown("---")
+            st.markdown("**Purpose**")
+            st.write(d["purpose"])
 
-        st.markdown("---")
-        st.markdown("**Speech length**")
-        st.write(d["speech_len"])
-    st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown("---")
+            st.markdown("**Speech length**")
+            st.write(d["speech_len"])
 
     st.divider()
 
@@ -575,42 +558,8 @@ if st.session_state.page == "evaluation":
             render_full_ice_breaker_criteria()
 
     rubric_items = render_rubric_table(RUBRIC_DEF)
-
-    # ✅ Total score + legend
-    total_score = compute_total_score(rubric_items)
-    max_score = len(rubric_items) * 5
-
-    st.subheader("Speaker's Competency Total Accumulated Score")
-    cA, cB = st.columns([1.2, 2.8], vertical_alignment="center")
-    with cA:
-        st.metric("Total Score", f"{total_score} / {max_score}")
-    with cB:
-        st.progress(total_score / max_score if max_score else 0)
-
-    st.markdown("**Legend (Total Score Range)**")
-    st.markdown(
-        """
-- **36-40** → **Outstanding (Exceptional/Superior)**
-- **28–35** → **Proficient (Expertise/Mastery)**
-- **20–27** → **Competent (Meets Standard)**
-- **8–19** → **Needs Improvement (Below Standard)**
-"""
-    )
-
-    label, style = overall_band(total_score)
-    if style == "success":
-        st.success(f"Overall Result: {label}")
-    elif style == "info":
-        st.info(f"Overall Result: {label}")
-    elif style == "warning":
-        st.warning(f"Overall Result: {label}")
-    else:
-        st.error(f"Overall Result: {label}")
-
-    # Strengths / Improvements (lists)
     strengths_text, improvements_text = build_rubric_summary(rubric_items)
-
-    st.divider()
+    selected_criteria_text = build_selected_criteria_text(d["project"], rubric_items)
 
     s1, s2 = st.columns(2)
     with s1:
@@ -624,18 +573,18 @@ if st.session_state.page == "evaluation":
 
     # ---- General comments ----
     st.subheader("General Comments - By Project Speech Evaluator")
-    st.caption("Tip: You can leave some boxes blank. At least one note/comment is needed before generating.")
+    l2, m2, r2 = st.columns([1, 6, 1])
+    with m2:
+        t1, t2 = st.columns(2)
+        with t1:
+            excelled = st.text_area("✅ You excelled at:", height=140)
+        with t2:
+            work_on = st.text_area("🔧 You may want to work on:", height=140)
 
-    t1, t2 = st.columns(2)
-    with t1:
-        excelled = st.text_area("✅ You excelled at:", height=140)
-    with t2:
-        work_on = st.text_area("🔧 You may want to work on:", height=140)
-    challenge = st.text_area("🎯 To challenge yourself:", height=140)
+        challenge = st.text_area("🎯 To challenge yourself:", height=140)
 
-    selected_criteria_text = build_selected_criteria_text(d["project"], rubric_items)
-
-    notes_payload = f"""
+        # ---- Compose notes payload for CrewAI ----
+        notes_payload = f"""
 Meeting details:
 - Speaker: {meeting.get("speaker") or "N/A"}
 - Evaluator: {meeting.get("evaluator") or "N/A"}
@@ -652,9 +601,6 @@ Level focus:
 
 Purpose:
 {d["purpose"]}
-
-Total score:
-- {total_score}/{max_score} ({label})
 
 {selected_criteria_text}
 
@@ -676,33 +622,36 @@ To challenge yourself:
 {challenge}
 """.strip()
 
-    if st.button("Generate Evaluation Draft (CrewAI)"):
-        if run_crewai_eval is None:
-            st.error("CrewAI module failed to import.")
-            st.code(CREWAI_IMPORT_ERROR)
-        else:
-            has_general = (excelled.strip() or work_on.strip() or challenge.strip())
-            has_any_rubric_comment = any((x.get("comment") or "").strip() for x in rubric_items)
-            if not has_general and not has_any_rubric_comment:
-                st.warning("Please add at least one rubric comment OR fill one general comment box before generating.")
+        # ---- CrewAI button ----
+        if st.button("Generate Evaluation Draft (CrewAI)"):
+            if run_crewai_eval is None:
+                st.error("CrewAI module failed to import.")
+                st.code(CREWAI_IMPORT_ERROR)
             else:
-                with st.spinner("Generating evaluation draft..."):
-                    output = run_crewai_eval(
-                        notes=notes_payload,
-                        pathway=d["pathway"],
-                        level=d["level"],
-                        project=d["project"],
-                        level_focus=d["level_focus"],
-                        purpose=d["purpose"],
-                        speech_len=d["speech_len"],
-                    )
-                st.session_state.crewai_output = output
+                has_general = (excelled.strip() or work_on.strip() or challenge.strip())
+                has_any_rubric_comment = any((x.get("comment") or "").strip() for x in rubric_items)
 
-    if st.session_state.crewai_output:
-        st.divider()
-        st.subheader("CrewAI Output")
-        with st.container(border=True):
-            st.write(st.session_state.crewai_output)
+                if not has_general and not has_any_rubric_comment:
+                    st.warning("Please add at least one rubric comment OR fill one general comment box before generating.")
+                else:
+                    with st.spinner("Generating evaluation draft..."):
+                        output = run_crewai_eval(
+                            notes=notes_payload,
+                            pathway=d["pathway"],
+                            level=d["level"],
+                            project=d["project"],
+                            level_focus=d["level_focus"],
+                            purpose=d["purpose"],
+                            speech_len=d["speech_len"],
+                        )
+                    st.session_state.crewai_output = output
+
+        # ---- Output ----
+        if st.session_state.crewai_output:
+            st.divider()
+            st.subheader("CrewAI Output")
+            with st.container(border=True):
+                st.write(st.session_state.crewai_output)
 
     st.caption(f"Using file: {d.get('md_path', '')}")
 
