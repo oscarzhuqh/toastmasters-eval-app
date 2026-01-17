@@ -590,10 +590,10 @@ if st.session_state.page == "evaluation":
     st.markdown("**Legend (Total Score Range)**")
     st.markdown(
         """
-- **32–40 (or 32 and above)** → **Outstanding**
-- **24–31** → **Exceed Expectation of Speech Project**
-- **16–23** → **Meets Minimum Expectation of Speech Project**
-- **8–15** → **Needs Improvement**
+- **36-40** → **Outstanding (Exceptional/Superior)**
+- **28–35** → **Proficient (Expertise/Mastery)**
+- **20–27** → **Competent (Meets Standard)**
+- **8–19** → **Needs Improvement (Below Standard)**
 """
     )
 
