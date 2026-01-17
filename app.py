@@ -231,7 +231,7 @@ logo_path = _find_logo_path()
 if logo_path:
     st.image(str(logo_path), width=110)
 
-st.markdown("# Toastmasters Evaluation Application")
+st.markdown("# Toastmasters Evaluation Application (T.E.A.) ")
 st.caption("NYP ITI123 Application Development Project by Zhu Qihui, Oscar 9801937V")
 
 # Step indicator
