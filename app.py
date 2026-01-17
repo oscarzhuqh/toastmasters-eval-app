@@ -232,6 +232,7 @@ if logo_path:
     st.image(str(logo_path), width=110)
 
 st.markdown("# Toastmasters Evaluation Application (T.E.A.) ")
+st.caption("The objective of this project is to build a web-based Toastmasters Evaluation Assistant (T.E.A.) that retrieves Pathways project objectives from a local knowledge base, captures rubric ratings and evaluator notes, and generates a structured, editable evaluation draft with export support (e.g., PDF/Markdown) to improve speed and consistency of speech evaluations.")
 st.caption("NYP ITI123 Application Development Project by Zhu Qihui, Oscar 9801937V")
 
 # Step indicator
