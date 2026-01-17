@@ -56,3 +56,46 @@ her primary style. The purpose of this speech is for the member to share the imp
 - **Purpose**: The purpose of this project is for the member to demonstrate his or her ability to listen to what others say.
 - **Speech length**: 5–7 minutes
 
+## Level 3
+**Level focus:**: Toastmasters Level 3 focuses on deepening specific path skills, moving beyond foundational speeches to tackle more complex projects like persuasive speaking, storytelling, or negotiation, requiring one core project and at least two electives to build expertise in areas like leadership, communication, or innovation, while also serving as a mentor or fulfilling other meeting roles. The key is increasing knowledge and applying specialized skills relevant to your chosen path's focus, such as building a proposal, delivering social speeches, or developing leadership strategies. 
+
+### Project: Understanding Emotional Intelligence
+- **Type:** Required
+- **Purpose**: The purpose of this project is for the member to cultivate an understanding of how his or her emotions impact
+relationships. It is also designed to help the member identify how others’ emotions impact his or her emotional
+state. The purpose of this speech is for the member to share some aspect of his or her experience journaling
+emotions or being aware of emotions when interacting with others.
+- **Speech length**: 5–7 minutes
+
+## Level 4
+**Level focus:**: Toastmasters Pathways Level 4 focuses on building specialized skills and applying learned techniques to real-world situations. At this stage, members move beyond foundational public speaking to develop more advanced, path-specific leadership and communication competencies, such as managing change, coaching, or advanced networking.  
+
+### Project: Motivate Others
+- **Type:** Required
+- **Purpose**: The purpose of this project is for the member to practice the skills needed to motivate team members through
+the completion of a project. The purpose of this speech is for the member to share some aspect of his or her experience motivating team members through the completion of a project. 
+- **Speech length**: 5–7 minutes
+
+## Level 5
+**Level focus:**: Toastmasters Pathways Level 5 focuses on Demonstrating Expertise, marking the final stage of a path where members apply accumulated skills to high-level leadership and communication projects. This level emphasizes mastery, requiring members to take on complex, real-world tasks, often involving long-term projects and providing strategic, expert-level feedback. 
+
+### Project: Team Builing - First Speech
+- **Type:** Required
+- **Purpose**: The purpose of this project is for the member to practice the skills needed to build a cohesive team and host
+an event. The purpose of this first speech is for the member to introduce the team-building event he or she plans to
+host.
+- **Speech length**: 2–3 minutes
+
+### Project: Team Builing - Second Speech
+- **Type:** Required
+- **Purpose**: The purpose of this project is for the member to practice the skills needed to build a cohesive team and host
+an event. The purpose of this second speech is for the member to share some aspect of his or her experience building a
+team and leading a team-building event.
+- **Speech length**: 5–7 minutes
+
+### Project: Reflect on Your Path
+- **Type:** Required
+- **Purpose**: The purpose of this project is for the member to reflect on his or her growth during the completion of an entire path. The purpose of the speech is for the member to share some aspect of his or her growth during the completion
+of a path.
+- **Speech length**: 10–12 minutes
+
