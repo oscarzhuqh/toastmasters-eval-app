@@ -1,11 +1,14 @@
-import streamlit as st
-from pathlib import Path
+import time
 import re
+from pathlib import Path
 from typing import Optional, List, Dict, Tuple
+
+import streamlit as st
 
 from crewai_eval import run_crewai_eval
 
-# -------------------- CONFIG --------------------
+
+# ==================== CONFIG ====================
 APP_DIR = Path(__file__).parent
 KB_DIR = APP_DIR / "knowledge" / "pathways"
 
@@ -26,8 +29,7 @@ LOGO_CANDIDATES = [
     APP_DIR / "assets" / "logo.png",
 ]
 
-# -------------------- EVALUATION CRITERIA (Ice Breaker) --------------------
-# IMPORTANT: variable name matches your rename request
+# ==================== EVALUATION CRITERIA (Ice Breaker) ====================
 SPEECH_EVALUATION_CRITERIA: Dict[str, Dict[int, str]] = {
     "Clarity": {
         5: "Is an exemplary public speaker who is always understood.",
@@ -87,7 +89,6 @@ SPEECH_EVALUATION_CRITERIA: Dict[str, Dict[int, str]] = {
     },
 }
 
-# Rubric rows shown in UI (order matters)
 RUBRIC_DEF = [
     ("Clarity", "Spoken language is clear and is easily understood"),
     ("Vocal Variety", "Uses tone, speed, and volume as tools"),
@@ -99,12 +100,14 @@ RUBRIC_DEF = [
     ("Well Supported", "Topic is supported by the content of the speech"),
 ]
 
-# -------------------- HELPERS --------------------
+
+# ==================== HELPERS ====================
 def find_logo_path() -> Optional[Path]:
     for p in LOGO_CANDIDATES:
         if p.exists():
             return p
     return None
+
 
 def resolve_md_path(pathway_label: str) -> Path:
     expected = KB_DIR / PATHWAY_FILES[pathway_label]
@@ -120,6 +123,7 @@ def resolve_md_path(pathway_label: str) -> Path:
         return alt2
 
     return expected
+
 
 def extract_level_block(md_path: Path, level: str) -> Optional[str]:
     if not md_path.exists():
@@ -137,23 +141,26 @@ def extract_level_block(md_path: Path, level: str) -> Optional[str]:
     )
     return "\n".join(lines[level_start:level_end])
 
+
 def extract_level_focus(level_block: str) -> Optional[str]:
     m = re.search(r"\*\*Level focus.*?\*\*\s*:?\s*(.+)", level_block, flags=re.IGNORECASE)
     return m.group(1).strip() if m else None
+
 
 def get_projects_from_markdown(md_path: Path, level: str) -> List[str]:
     level_block = extract_level_block(md_path, level)
     if not level_block:
         return []
     projects = re.findall(r"^###\s*Project:\s*(.+)\s*$", level_block, flags=re.IGNORECASE | re.MULTILINE)
-    seen = set()
-    out = []
+    # dedupe
+    out, seen = [], set()
     for p in projects:
         p2 = p.strip()
         if p2 and p2.lower() not in seen:
             seen.add(p2.lower())
             out.append(p2)
     return out
+
 
 def extract_project_block(level_block: str, project: str) -> Optional[str]:
     lines = level_block.splitlines()
@@ -163,20 +170,22 @@ def extract_project_block(level_block: str, project: str) -> Optional[str]:
     if proj_start is None:
         return None
 
-    proj_end = next(
-        (i for i in range(proj_start + 1, len(lines)) if lines[i].strip().startswith("### Project:")),
-        len(lines),
-    )
+    proj_end = next((i for i in range(proj_start + 1, len(lines)) if lines[i].strip().startswith("### Project:")), len(lines))
     return "\n".join(lines[proj_start:proj_end])
+
 
 def extract_field(proj_block: str, field_name: str) -> Optional[str]:
     pattern = rf"-\s*\*\*{re.escape(field_name)}.*?\*\*?\s*:?\s*(.+)"
     m = re.search(pattern, proj_block, flags=re.IGNORECASE)
     return m.group(1).strip() if m else None
 
+
+def is_ice_breaker(project: str) -> bool:
+    return project.strip().lower() == "ice breaker"
+
+
 def build_rubric_summary(rubric_items: List[Dict]) -> Tuple[str, str]:
-    strengths = []
-    improvements = []
+    strengths, improvements = [], []
     for item in rubric_items:
         name = item["name"]
         rating = int(item["rating"])
@@ -186,16 +195,12 @@ def build_rubric_summary(rubric_items: List[Dict]) -> Tuple[str, str]:
             strengths.append(line)
         else:
             improvements.append(line)
-
     strengths_text = "\n".join(strengths) if strengths else "- (none selected)"
     improvements_text = "\n".join(improvements) if improvements else "- (none selected)"
     return strengths_text, improvements_text
 
-def is_ice_breaker(project: str) -> bool:
-    return project.strip().lower() == "ice breaker"
 
 def build_selected_criteria_text(project: str, rubric_items: List[Dict]) -> str:
-    # Only attach criteria meaning for Ice Breaker (your current criteria set)
     if not is_ice_breaker(project):
         return ""
     lines = ["Evaluation criteria meaning (Ice Breaker):"]
@@ -209,10 +214,11 @@ def build_selected_criteria_text(project: str, rubric_items: List[Dict]) -> str:
             lines.append(f"- {name} {rating}/5")
     return "\n".join(lines)
 
+
 def render_full_speech_evaluation_criteria():
     st.markdown("### Evaluation Criteria (Ice Breaker)")
     st.caption("Use these descriptions to guide your 1–5 ratings.")
-    for name, _desc in RUBRIC_DEF:
+    for name, _ in RUBRIC_DEF:
         st.markdown(f"**{name}**")
         mapping = SPEECH_EVALUATION_CRITERIA.get(name, {})
         for score in [5, 4, 3, 2, 1]:
@@ -220,10 +226,12 @@ def render_full_speech_evaluation_criteria():
                 st.markdown(f"- **{score}** — {mapping[score]}")
         st.markdown("---")
 
+
 def render_rubric_table(rubric_def: List[Tuple[str, str]]) -> List[Dict]:
     """
     Official-sheet-like row layout:
       [Criteria] | [5 4 3 2 1] | [Comment box]
+    Default rating is 3.
     """
     rubric_items: List[Dict] = []
 
@@ -241,7 +249,6 @@ def render_rubric_table(rubric_def: List[Tuple[str, str]]) -> List[Dict]:
 
         for name, desc in rubric_def:
             c1, c2, c3 = st.columns([2.2, 3.2, 3.6], vertical_alignment="center")
-
             with c1:
                 st.markdown(f"**{name}**")
                 st.caption(desc)
@@ -250,7 +257,7 @@ def render_rubric_table(rubric_def: List[Tuple[str, str]]) -> List[Dict]:
                 rating = st.radio(
                     label=f"{name} rating",
                     options=[5, 4, 3, 2, 1],
-                    index=2,  # ✅ default to 3
+                    index=2,  # default=3 ✅
                     horizontal=True,
                     label_visibility="collapsed",
                     key=f"rubric_rating_{name}",
@@ -266,17 +273,27 @@ def render_rubric_table(rubric_def: List[Tuple[str, str]]) -> List[Dict]:
                 )
 
             rubric_items.append({"name": name, "rating": rating, "comment": comment})
-
-            st.markdown(
-                "<hr style='margin:0.35rem 0; border:0; border-top:1px solid #eee;'>",
-                unsafe_allow_html=True,
-            )
+            st.markdown("<hr style='margin:0.35rem 0; border:0; border-top:1px solid #eee;'>", unsafe_allow_html=True)
 
     return rubric_items
 
 
-# -------------------- UI --------------------
-st.set_page_config(page_title="Toastmasters Evaluation Application", page_icon="☕", layout="centered")
+# ==================== PAGE ROUTER STATE ====================
+if "page" not in st.session_state:
+    st.session_state.page = "select"  # select | loading | evaluation
+
+if "details" not in st.session_state:
+    st.session_state.details = None
+
+if "crewai_output" not in st.session_state:
+    st.session_state.crewai_output = None
+
+if "meeting" not in st.session_state:
+    st.session_state.meeting = {"speaker": "", "evaluator": "", "date": None}
+
+
+# ==================== UI SETUP ====================
+st.set_page_config(page_title="Toastmasters Evaluation Assistant T.E.A.", page_icon="☕", layout="centered")
 
 st.markdown(
     """
@@ -288,104 +305,161 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-if "details" not in st.session_state:
-    st.session_state.details = None
-if "crewai_output" not in st.session_state:
-    st.session_state.crewai_output = None
-
-# Header
 logo_path = find_logo_path()
-h1, h2 = st.columns([1, 5], vertical_alignment="center")
-with h1:
-    if logo_path:
-        st.image(str(logo_path), use_container_width=True)
-with h2:
-    st.markdown("# Toastmasters Evaluation Application")
-    st.caption("T.E.A. — Toastmasters Evaluation Assistant")
 
-st.divider()
 
-# Meeting details
-st.subheader("Meeting Details")
-c1, c2, c3 = st.columns(3)
-with c1:
-    speaker_name = st.text_input("Speaker Name", placeholder="e.g., Alex Tan")
-with c2:
-    evaluator_name = st.text_input("Evaluator Name", placeholder="e.g., Oscar Zhu")
-with c3:
-    meeting_date = st.date_input("Date of Meeting")
+def render_header():
+    h1, h2 = st.columns([1, 5], vertical_alignment="center")
+    with h1:
+        if logo_path:
+            st.image(str(logo_path), use_container_width=True)
+    with h2:
+        st.markdown("# Toastmasters Evaluation Assistant T.E.A.")
+        st.caption(
+            "Objective of T.E.A. is to help speech evaluators turn rubric ratings + rough notes into a structured, "
+            "project-aligned evaluation draft, by retrieving the selected Pathways project purpose/level focus "
+            "from a local knowledge base and using CrewAI to generate an editable evaluation."
+        )
+        st.caption("NYP ITI123 Application Development Project by Zhu Qihui, Oscar 9801937V")
 
-st.divider()
 
-# Select pathway/level/project
-pathway = st.selectbox("Select Pathway", list(PATHWAY_FILES.keys()))
-level = st.selectbox("Select Level", LEVELS)
+# ==================== PAGE 1: SELECT ====================
+if st.session_state.page == "select":
+    render_header()
+    st.divider()
 
-md_path = resolve_md_path(pathway)
-if not md_path.exists():
-    st.error(f"Markdown file not found for '{pathway}'. Expected at: {md_path}")
-    st.stop()
+    st.subheader("Chapter Meeting Details")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        speaker_name = st.text_input("Speaker Name", value=st.session_state.meeting.get("speaker", ""), placeholder="e.g., Oscar Zhu")
+    with c2:
+        evaluator_name = st.text_input("Evaluator Name", value=st.session_state.meeting.get("evaluator", ""), placeholder="e.g., Lee Ching Yuh")
+    with c3:
+        meeting_date = st.date_input("Date of Chapter Meeting", value=st.session_state.meeting.get("date"))
 
-project_options = get_projects_from_markdown(md_path, level)
-if not project_options:
-    st.warning(f"No projects found for **{level}** in **{md_path.name}**.")
-    st.info("Fix: add headings like `### Project: <Project Name>` under `## Level X`.")
-    st.stop()
+    # persist meeting details
+    st.session_state.meeting = {"speaker": speaker_name, "evaluator": evaluator_name, "date": meeting_date}
 
-project = st.selectbox("Select Project", project_options, key=f"project_{pathway}_{level}")
+    st.divider()
 
-btn1, btn2 = st.columns([1, 1])
-with btn1:
-    get_details = st.button("Get Details")
-with btn2:
-    clear = st.button("Clear")
+    pathway = st.selectbox("Select Pathway", list(PATHWAY_FILES.keys()), key="pathway_sel")
+    level = st.selectbox("Select Level", LEVELS, key="level_sel")
 
-if clear:
-    st.session_state.details = None
-    st.session_state.crewai_output = None
+    md_path = resolve_md_path(pathway)
+    if not md_path.exists():
+        st.error(f"Markdown file not found for '{pathway}'. Expected at: {md_path}")
+        st.stop()
+
+    project_options = get_projects_from_markdown(md_path, level)
+    if not project_options:
+        st.warning(f"No projects found for **{level}** in **{md_path.name}**.")
+        st.info("Fix: add headings like `### Project: <Project Name>` under `## Level X`.")
+        st.stop()
+
+    project = st.selectbox("Select Project", project_options, key="project_sel")
+
+    b1, b2 = st.columns([1, 1])
+    with b1:
+        get_details = st.button("Get Details")
+    with b2:
+        clear = st.button("Clear")
+
+    if clear:
+        st.session_state.details = None
+        st.session_state.crewai_output = None
+        st.session_state.page = "select"
+        st.rerun()
+
+    if get_details:
+        # parse details and store
+        level_block = extract_level_block(md_path, level)
+        if not level_block:
+            st.error(f"❌ Level '{level}' not found in {md_path.name}.")
+            st.info("Fix: Add heading like `## Level 2` into the markdown file.")
+            st.stop()
+
+        proj_block = extract_project_block(level_block, project)
+        if not proj_block:
+            st.error(
+                f"❌ '{project}' is not found under **{level}** in **{md_path.name}**.\n\n"
+                "✅ Please select the correct pathway OR add this project into the pathway markdown file."
+            )
+            available = re.findall(r"^###\s*Project:\s*(.+)\s*$", level_block, flags=re.IGNORECASE | re.MULTILINE)
+            if available:
+                st.caption("Projects currently found in this pathway + level:")
+                st.write(available)
+            st.stop()
+
+        level_focus = extract_level_focus(level_block) or "Not found"
+        purpose = extract_field(proj_block, "Purpose") or "Not found"
+        speech_len = (
+            extract_field(proj_block, "Speech length (optional)")
+            or extract_field(proj_block, "Speech length")
+            or "Not found"
+        )
+
+        st.session_state.details = {
+            "pathway": pathway,
+            "level": level,
+            "project": project,
+            "level_focus": level_focus,
+            "purpose": purpose,
+            "speech_len": speech_len,
+            "md_path": str(md_path),
+        }
+        st.session_state.crewai_output = None
+
+        # ✅ go to loading page then evaluation page
+        st.session_state.page = "loading"
+        st.rerun()
+
+    st.caption(f"Using file: {md_path}")
+    st.stop()  # ✅ IMPORTANT: prevents rubric/comments rendering on the same page
+
+
+# ==================== PAGE 2: LOADING ====================
+elif st.session_state.page == "loading":
+    render_header()
+    st.divider()
+
+    st.subheader("Loading project details…")
+    st.caption("Please wait while we prepare the evaluation form.")
+    bar = st.progress(0)
+
+    # ≥ 3 seconds
+    for i in range(101):
+        bar.progress(i)
+        time.sleep(0.03)
+
+    st.session_state.page = "evaluation"
     st.rerun()
 
-# Get details
-if get_details:
-    level_block = extract_level_block(md_path, level)
-    if not level_block:
-        st.error(f"❌ Level '{level}' not found in {md_path.name}.")
-        st.info("Fix: Add heading like `## Level 2` into the markdown file.")
-        st.stop()
 
-    proj_block = extract_project_block(level_block, project)
-    if not proj_block:
-        st.error(
-            f"❌ '{project}' is not found under **{level}** in **{md_path.name}**.\n\n"
-            "✅ Please select the correct pathway OR add this project into the pathway markdown file."
-        )
-        available = re.findall(r"^###\s*Project:\s*(.+)\s*$", level_block, flags=re.IGNORECASE | re.MULTILINE)
-        if available:
-            st.caption("Projects currently found in this pathway + level:")
-            st.write(available)
-        st.stop()
+# ==================== PAGE 3: EVALUATION ====================
+elif st.session_state.page == "evaluation":
+    if not st.session_state.details:
+        st.session_state.page = "select"
+        st.rerun()
 
-    level_focus = extract_level_focus(level_block) or "Not found"
-    purpose = extract_field(proj_block, "Purpose") or "Not found"
-    speech_len = (
-        extract_field(proj_block, "Speech length (optional)")
-        or extract_field(proj_block, "Speech length")
-        or "Not found"
-    )
+    render_header()
+    st.divider()
 
-    st.session_state.details = {
-        "pathway": pathway,
-        "level": level,
-        "project": project,
-        "level_focus": level_focus,
-        "purpose": purpose,
-        "speech_len": speech_len,
-    }
-    st.session_state.crewai_output = None
+    top1, top2, top3 = st.columns([1, 1, 2])
+    with top1:
+        if st.button("⬅ Back"):
+            st.session_state.page = "select"
+            st.rerun()
+    with top2:
+        if st.button("🧹 Clear All"):
+            st.session_state.details = None
+            st.session_state.crewai_output = None
+            st.session_state.page = "select"
+            st.rerun()
 
-# Show details + rubric + generation
-if st.session_state.details:
     d = st.session_state.details
+    meeting = st.session_state.meeting
+    meeting_date = meeting.get("date")
+    meeting_date_str = str(meeting_date) if meeting_date else "N/A"
 
     st.subheader("Project Details")
     left, mid, right = st.columns([1, 3, 1])
@@ -416,7 +490,6 @@ if st.session_state.details:
             render_full_speech_evaluation_criteria()
 
     rubric_items = render_rubric_table(RUBRIC_DEF)
-
     strengths_text, improvements_text = build_rubric_summary(rubric_items)
     selected_criteria_text = build_selected_criteria_text(d["project"], rubric_items)
 
@@ -431,7 +504,6 @@ if st.session_state.details:
     st.divider()
 
     st.subheader("General Comments - By Project Speech Evaluator")
-
     l2, m2, r2 = st.columns([1, 6, 1])
     with m2:
         t1, t2 = st.columns(2)
@@ -444,9 +516,21 @@ if st.session_state.details:
 
         notes_payload = f"""
 Meeting details:
-- Speaker: {speaker_name or "N/A"}
-- Evaluator: {evaluator_name or "N/A"}
-- Date: {meeting_date}
+- Speaker: {meeting.get("speaker") or "N/A"}
+- Evaluator: {meeting.get("evaluator") or "N/A"}
+- Date: {meeting_date_str}
+
+Selected project context:
+- Pathway: {d["pathway"]}
+- Level: {d["level"]}
+- Project: {d["project"]}
+- Speech length: {d["speech_len"]}
+
+Level focus:
+{d["level_focus"]}
+
+Purpose:
+{d["purpose"]}
 
 {selected_criteria_text}
 
@@ -474,15 +558,16 @@ To challenge yourself:
             if not has_general and not has_any_rubric_comment:
                 st.warning("Please add at least one rubric comment or fill one general comment box before generating.")
             else:
-                output = run_crewai_eval(
-                    notes=notes_payload,
-                    pathway=d["pathway"],
-                    level=d["level"],
-                    project=d["project"],
-                    level_focus=d["level_focus"],
-                    purpose=d["purpose"],
-                    speech_len=d["speech_len"],
-                )
+                with st.spinner("Generating evaluation draft..."):
+                    output = run_crewai_eval(
+                        notes=notes_payload,
+                        pathway=d["pathway"],
+                        level=d["level"],
+                        project=d["project"],
+                        level_focus=d["level_focus"],
+                        purpose=d["purpose"],
+                        speech_len=d["speech_len"],
+                    )
                 st.session_state.crewai_output = output
 
         if st.session_state.crewai_output:
@@ -491,4 +576,5 @@ To challenge yourself:
             with st.container(border=True):
                 st.write(st.session_state.crewai_output)
 
-st.caption(f"Using file: {md_path}")
+    st.caption(f"Using file: {d.get('md_path', '')}")
+
