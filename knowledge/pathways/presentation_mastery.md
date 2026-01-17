@@ -58,4 +58,34 @@ her primary style. The purpose of this speech is for the member to share the imp
 delivering a speech.
 - **Speech length**: 5–7 minutes
 
+## Level 3
+**Level focus:**: Toastmasters Level 3 focuses on deepening specific path skills, moving beyond foundational speeches to tackle more complex projects like persuasive speaking, storytelling, or negotiation, requiring one core project and at least two electives to build expertise in areas like leadership, communication, or innovation, while also serving as a mentor or fulfilling other meeting roles. The key is increasing knowledge and applying specialized skills relevant to your chosen path's focus, such as building a proposal, delivering social speeches, or developing leadership strategies. 
+
+### Project: Persuasive Speaking
+- **Type:** Required
+- **Purpose**: The purpose of this project is for the member to understand the types of persuasive speeches and deliver a
+persuasive speech at a club meeting.
+- **Speech length**: 5–7 minutes
+
+## Level 4
+**Level focus:**: Toastmasters Pathways Level 4 focuses on building specialized skills and applying learned techniques to real-world situations. At this stage, members move beyond foundational public speaking to develop more advanced, path-specific leadership and communication competencies, such as managing change, coaching, or advanced networking.  
+
+### Project: Managing a Difficult Audience
+- **Type:** Required
+- **Purpose**: The purpose of this project is for the member to practice the skills needed to address audience challenges when he or she presents outside of the Toastmasters club.
+- **Speech length**: 10-15 minutes 
+
+## Level 5
+**Level focus:**: Toastmasters Pathways Level 5 focuses on Demonstrating Expertise, marking the final stage of a path where members apply accumulated skills to high-level leadership and communication projects. This level emphasizes mastery, requiring members to take on complex, real-world tasks, often involving long-term projects and providing strategic, expert-level feedback. 
+
+### Project: Prepare to Speak Professionally
+- **Type:** Required
+- **Purpose**: The purpose of this project is for the member to practice developing and presenting a longer speech.
+- **Speech length**: 18–22 minutes
+
+### Project: Reflect on Your Path
+- **Type:** Required
+- **Purpose**: The purpose of this project is for the member to reflect on his or her growth during the completion of an entire path. The purpose of the speech is for the member to share some aspect of his or her growth during the completion
+of a path.
+- **Speech length**: 10–12 minutes
 
