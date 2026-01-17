@@ -1,25 +1,63 @@
-import time
+"""Toastmasters Evaluation Application (T.E.A.)
+
+Multi-step Streamlit wizard:
+1/4 Select Project Details
+2/4 Load Project (from local markdown knowledge base)
+3/4 Evaluation Form (rubric + general comments + notes)
+4/4 Draft & Export (CrewAI draft + downloads)
+
+Folder structure (repo root):
+  knowledge/
+    pathways/
+      presentation_mastery.md
+      dynamic_leadership.md
+      engaging_humor.md
+      motivational_strategies.md
+      persuasive_influence.md
+      visionary_communication.md
+
+Optional PDF export:
+- Add `reportlab` to requirements.txt on Streamlit Cloud to enable direct PDF download.
+  Example: reportlab>=4.0
+"""
+
+from __future__ import annotations
+
+import io
 import re
-import html
+import time
 from pathlib import Path
+from typing import Dict, List, Tuple
 
 import streamlit as st
 
-# ==================== CrewAI import (safe) ====================
+# -------------------- OPTIONAL PDF (ReportLab) --------------------
+try:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import Preformatted, SimpleDocTemplate, Spacer
+
+    _PDF_OK = True
+except Exception:
+    _PDF_OK = False
+
+# -------------------- OPTIONAL CREWAI --------------------
 try:
     from crewai_eval import run_crewai_eval
+
+    CREWAI_IMPORT_ERROR = ""
 except Exception as e:
     run_crewai_eval = None
     CREWAI_IMPORT_ERROR = str(e)
-else:
-    CREWAI_IMPORT_ERROR = ""
 
+# -------------------- CONFIG --------------------
+APP_TITLE = "Toastmasters Evaluation Application"
+APP_SUBTITLE = "Toastmasters Evaluation Assistant T.E.A."
 
-# ==================== CONFIG ====================
-APP_DIR = Path(__file__).parent
-KB_DIR = APP_DIR / "knowledge" / "pathways"
+KB_DIR = Path(__file__).parent / "knowledge" / "pathways"
+LOGO_PATH = Path(__file__).parent / "TEA TM Logo.png"  # keep this filename in repo root
 
-PATHWAY_FILES = {
+PATHWAY_FILES: Dict[str, str] = {
     "Dynamic Leadership": "dynamic_leadership.md",
     "Engaging Humor": "engaging_humor.md",
     "Motivational Strategies": "motivational_strategies.md",
@@ -30,14 +68,11 @@ PATHWAY_FILES = {
 
 LEVELS = ["Level 1", "Level 2", "Level 3", "Level 4", "Level 5"]
 
-LOGO_CANDIDATES = [
-    APP_DIR / "TEA TM Logo.png",
-    APP_DIR / "assets" / "TEA TM Logo.png",
-    APP_DIR / "assets" / "logo.png",
-]
+# NOTE: Project dropdown list is driven per-pathway by reading the markdown.
+# If a project is not in the markdown, it will NOT be shown (your preferred option A).
 
-# Evaluation criteria (Ice Breaker)
-SPEECH_EVALUATION_CRITERIA = {
+# Evaluation criteria used in the rubric expander + strength/improvement split.
+SPEECH_EVALUATION_CRITERIA: Dict[str, Dict[int, str]] = {
     "Clarity": {
         5: "Is an exemplary public speaker who is always understood.",
         4: "Excels at communicating using the spoken word.",
@@ -90,31 +125,26 @@ SPEECH_EVALUATION_CRITERIA = {
     "Well Supported": {
         5: "Delivers exemplary speech with a topic that is well-supported by content of the speech.",
         4: "Speech is excellent with a topic that is well-supported by content of the speech.",
-        3: "Speech topic is well-supported by content of the speech.",
+        3: "Speech topic is well-supported by content of speech.",
         2: "Speech contains content that supports the topic though some content may seem disconnected.",
         1: "Speech content is unrelated to the topic of the speech.",
     },
 }
 
+RUBRIC_NAMES = list(SPEECH_EVALUATION_CRITERIA.keys())
+
 SCORE_LEGEND = [
-    (32, 40, "Outstanding"),
-    (24, 31, "Exceed Expectation of Speech Project"),
-    (16, 23, "Meets Minimum Expectation of Speech Project"),
-    (8, 15, "Needs Improvement"),
+    "32–40 (or 32 and above) → Outstanding",
+    "24–31 → Exceed Expectation of Speech Project",
+    "16–23 → Meets Minimum Expectation of Speech Project",
+    "8–15 → Needs Improvement",
 ]
 
 
-# ==================== Helpers ====================
+# -------------------- HELPERS --------------------
 
-def _find_logo_path() -> Path | None:
-    for p in LOGO_CANDIDATES:
-        if p.exists():
-            return p
-    return None
-
-
-def set_page(next_page: str) -> None:
-    st.session_state.page = next_page
+def safe_text(s: str) -> str:
+    return (s or "").strip()
 
 
 def extract_level_block(md_path: Path, level: str) -> str | None:
@@ -122,9 +152,9 @@ def extract_level_block(md_path: Path, level: str) -> str | None:
         return None
 
     lines = md_path.read_text(encoding="utf-8").splitlines()
-    level_header = f"## {level}"
+    level_header = f"## {level}".lower()
 
-    level_start = next((i for i, line in enumerate(lines) if line.strip().lower() == level_header.lower()), None)
+    level_start = next((i for i, line in enumerate(lines) if line.strip().lower() == level_header), None)
     if level_start is None:
         return None
 
@@ -132,527 +162,657 @@ def extract_level_block(md_path: Path, level: str) -> str | None:
     return "\n".join(lines[level_start:level_end])
 
 
-def list_projects_in_level(md_path: Path, level: str) -> list[str]:
-    level_block = extract_level_block(md_path, level)
-    if not level_block:
-        return []
-
-    projects = re.findall(r"^###\s*Project:\s*(.+)\s*$", level_block, flags=re.IGNORECASE | re.MULTILINE)
-    # keep order, de-dupe
-    seen = set()
-    out: list[str] = []
-    for p in projects:
-        name = p.strip()
-        if name and name.lower() not in seen:
-            out.append(name)
-            seen.add(name.lower())
-    return out
-
-
 def extract_level_focus(level_block: str) -> str | None:
-    m = re.search(r"\*\*Level focus.*?\*\*\s*:?\s*(.+)", level_block, flags=re.IGNORECASE)
+    # supports: **Level focus (your words):** text
+    m = re.search(r"\*\*Level focus.*?\*\*\s*:?‌?\s*(.+)", level_block, flags=re.IGNORECASE)
     return m.group(1).strip() if m else None
+
+
+def list_projects_in_level(level_block: str) -> List[str]:
+    return re.findall(r"^###\s*Project:\s*(.+)\s*$", level_block, flags=re.IGNORECASE | re.MULTILINE)
 
 
 def extract_project_block(level_block: str, project: str) -> str | None:
     lines = level_block.splitlines()
-    header = f"### Project: {project}"
+    project_header = f"### Project: {project}".lower()
 
-    start = next((i for i, line in enumerate(lines) if line.strip().lower() == header.lower()), None)
-    if start is None:
+    proj_start = next((i for i, line in enumerate(lines) if line.strip().lower() == project_header), None)
+    if proj_start is None:
         return None
 
-    end = next((i for i in range(start + 1, len(lines)) if lines[i].strip().startswith("### Project:")), len(lines))
-    return "\n".join(lines[start:end])
+    proj_end = next(
+        (i for i in range(proj_start + 1, len(lines)) if lines[i].strip().startswith("### Project:")),
+        len(lines),
+    )
+    return "\n".join(lines[proj_start:proj_end])
 
 
 def extract_field(proj_block: str, field_name: str) -> str | None:
-    pattern = rf"-\s*\*\*{re.escape(field_name)}.*?\*\*?\s*:?\s*(.+)"
+    # supports: - **Purpose:** text  OR - **Speech length (optional)**: text
+    pattern = rf"-\s*\*\*{re.escape(field_name)}.*?\*\*\s*:?‌?\s*(.+)"
     m = re.search(pattern, proj_block, flags=re.IGNORECASE)
     return m.group(1).strip() if m else None
 
 
-def score_label(total: int) -> str:
-    for lo, hi, label in SCORE_LEGEND:
-        if lo <= total <= hi:
-            return label
-    return ""
+def pdf_bytes_from_markdown(md_text: str, title: str = "Evaluation Draft") -> bytes | None:
+    if not _PDF_OK:
+        return None
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=A4,
+        leftMargin=36,
+        rightMargin=36,
+        topMargin=36,
+        bottomMargin=36,
+    )
+    styles = getSampleStyleSheet()
+
+    story = []
+    story.append(Preformatted(title, styles["Heading1"]))
+    story.append(Spacer(1, 12))
+
+    # Keep it simple + predictable: render markdown as preformatted text.
+    story.append(Preformatted(md_text, styles["Code"]))
+
+    doc.build(story)
+    return buf.getvalue()
 
 
-def min3s_progress(message: str = "Loading…") -> None:
-    st.write(message)
-    p = st.progress(0)
-    # 3.0s total (approx)
-    steps = 30
-    for i in range(steps):
-        time.sleep(0.1)
-        p.progress(int((i + 1) / steps * 100))
+def step_header(page: str) -> None:
+    steps: List[Tuple[str, str, str]] = [
+        ("select", "Step 1/4", "Select Project Details"),
+        ("load", "Step 2/4", "Load Project"),
+        ("form", "Step 3/4", "Evaluation Form"),
+        ("draft", "Step 4/4", "Draft & Export"),
+    ]
+
+    # Treat draft_loading as step 4 too
+    normalized = "draft" if page in {"draft", "draft_loading"} else page
+    current_i = {k: i for i, (k, _, _) in enumerate(steps)}.get(normalized, 0)
+
+    cols = st.columns(4)
+    for i, (k, step_label, step_title) in enumerate(steps):
+        with cols[i]:
+            checked = "✅" if i < current_i else ("☑️" if i == current_i else "")
+            st.markdown(f"**{checked} {step_label}**  ")
+            st.caption(step_title)
+
+    st.progress((current_i + 1) / 4)
 
 
-def make_printable_html(title: str, body_markdown: str) -> str:
-    escaped = html.escape(body_markdown)
-    return f"""<!doctype html>
-<html>
-<head>
-  <meta charset='utf-8'>
-  <title>{html.escape(title)}</title>
-  <style>
-    body {{ font-family: Arial, sans-serif; margin: 24px; }}
-    h1,h2,h3 {{ margin: 0.6em 0 0.3em; }}
-    .meta {{ color: #555; font-size: 12px; margin-bottom: 16px; }}
-    pre {{ white-space: pre-wrap; word-wrap: break-word; font-size: 13px; line-height: 1.4; }}
-    @media print {{ body {{ margin: 12mm; }} }}
-  </style>
-</head>
-<body>
-  <h2>{html.escape(title)}</h2>
-  <div class='meta'>Tip: Use your browser Print → Save as PDF.</div>
-  <pre>{escaped}</pre>
-</body>
-</html>"""
+def init_state() -> None:
+    ss = st.session_state
+    ss.setdefault("page", "select")
+
+    # Meeting details
+    ss.setdefault("speaker_name", "")
+    ss.setdefault("evaluator_name", "")
+    ss.setdefault("meeting_date", None)
+    ss.setdefault("speech_title", "")
+
+    # Selection
+    ss.setdefault("pathway", "Dynamic Leadership")
+    ss.setdefault("level", "Level 1")
+    ss.setdefault("project", "")
+
+    # Loaded project details
+    ss.setdefault("level_focus", "")
+    ss.setdefault("purpose", "")
+    ss.setdefault("speech_len", "")
+
+    # Rubric
+    ss.setdefault("rubric_scores", {name: 3 for name in RUBRIC_NAMES})
+    ss.setdefault("rubric_comments", {name: "" for name in RUBRIC_NAMES})
+
+    # General comments
+    ss.setdefault("excelled", "")
+    ss.setdefault("work_on", "")
+    ss.setdefault("challenge", "")
+
+    # CrewAI notes (optional)
+    ss.setdefault("notes", "")
+
+    # Draft output
+    ss.setdefault("draft_md", "")
 
 
-# ==================== Page setup ====================
-st.set_page_config(page_title="Toastmasters Evaluation Application", page_icon="🫖", layout="centered")
-
-if "page" not in st.session_state:
-    st.session_state.page = "intro"
-
-# storage
-st.session_state.setdefault("meeting", {})
-st.session_state.setdefault("project_details", {})
-st.session_state.setdefault("rubric", {})
-st.session_state.setdefault("crewai_output", "")
-
-page = st.session_state.page
-
-# ==================== Header ====================
-logo_path = _find_logo_path()
-if logo_path:
-    st.image(str(logo_path), width=110)
-
-st.markdown("# Toastmasters Evaluation Application (T.E.A.) ")
-st.caption("The objective of this project is to build a web-based Toastmasters Evaluation Assistant (T.E.A.) that retrieves Pathways project objectives from a local knowledge base, captures rubric ratings and evaluator notes, and generates a structured, editable evaluation draft with export support (e.g., PDF/Markdown) to improve speed and consistency of speech evaluations.")
-st.caption("NYP ITI123 Application Development Project by Zhu Qihui, Oscar 9801937V")
-
-# Step indicator
-steps = [
-    ("intro", "Step 1/4", "Select Project Details"),
-    ("loading", "Step 2/4", "Load Project"),
-    ("evaluation", "Step 3/4", "Evaluation Form"),
-    ("draft", "Step 4/4", "Draft & Export"),
-]
-step_idx = {k: i for i, (k, _, _) in enumerate(steps)}
-current_i = step_idx.get(page, 0)
-
-cols = st.columns(4)
-for i, (k, label, desc) in enumerate(steps):
-    with cols[i]:
-        icon = "✅" if i < current_i else ("☑️" if i == current_i else "")
-        st.markdown(f"**{icon} {label}**\n\n{desc}")
-
-st.progress(int((current_i + 1) / 4 * 100))
-
-st.write("---")
+def go(page: str) -> None:
+    st.session_state.page = page
+    st.rerun()
 
 
-# ==================== Step 1: Intro ====================
-if page == "intro":
-    st.subheader("Chapter Meeting Details")
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        speaker = st.text_input("Speaker Name", value=st.session_state.meeting.get("speaker", ""), placeholder="e.g., Oscar Zhu")
-    with c2:
-        evaluator = st.text_input("Evaluator Name", value=st.session_state.meeting.get("evaluator", ""), placeholder="e.g., Lee Ching Yuh")
-    with c3:
-        meeting_date = st.date_input("Date of Chapter Meeting", value=st.session_state.meeting.get("meeting_date", None))
-
-    speech_title = st.text_input("Speech Title", value=st.session_state.meeting.get("speech_title", ""), placeholder="e.g., Living with Dignity or Charity")
-
-    st.write("---")
-    st.subheader("Select Project")
-
-    pathway = st.selectbox("Select Pathway", list(PATHWAY_FILES.keys()), index=0)
-    level = st.selectbox("Select Level", LEVELS, index=0)
-
-    md_path = KB_DIR / PATHWAY_FILES[pathway]
-    available_projects = list_projects_in_level(md_path, level) if md_path.exists() else []
-
-    if not md_path.exists():
-        st.error(f"Markdown not found: {md_path}. Create it under knowledge/pathways/")
-        st.stop()
-
-    if not available_projects:
-        st.warning(
-            "No projects found for this Pathway + Level in your markdown yet. "
-            "Add headings like `### Project: Ice Breaker` under `## Level 1`."
-        )
-        with st.expander("Projects found in this markdown file"):
-            text = md_path.read_text(encoding="utf-8")
-            all_projects = re.findall(r"^###\s*Project:\s*(.+)\s*$", text, flags=re.IGNORECASE | re.MULTILINE)
-            st.write(all_projects)
-        st.stop()
-
-    project = st.selectbox("Select Project", available_projects)
-
-    colA, colB = st.columns([1, 1])
-    with colA:
-        if st.button("Get Details", type="primary"):
-            # save meeting
-            st.session_state.meeting = {
-                "speaker": speaker,
-                "evaluator": evaluator,
-                "meeting_date": meeting_date,
-                "speech_title": speech_title,
-            }
-            st.session_state.project_details = {
-                "pathway": pathway,
-                "level": level,
-                "project": project,
-                "md_path": str(md_path),
-            }
-            set_page("loading")
-            st.rerun()
-
-    with colB:
-        if st.button("Reset"):
-            st.session_state.clear()
-            st.rerun()
+def get_md_path(pathway: str) -> Path:
+    filename = PATHWAY_FILES.get(pathway, "")
+    return KB_DIR / filename
 
 
-# ==================== Step 2: Loading ====================
-elif page == "loading":
-    st.subheader("Loading project details")
-    min3s_progress("Please wait… loading selected project (minimum 3 seconds).")
-
-    details = st.session_state.get("project_details", {})
-    md_path = Path(details.get("md_path", ""))
-    level = details.get("level", "")
-    project = details.get("project", "")
-    pathway = details.get("pathway", "")
-
-    if not md_path.exists():
-        st.error(f"Markdown file not found: {md_path}")
-        if st.button("Back"):
-            set_page("intro")
-            st.rerun()
-        st.stop()
-
+def read_available_projects(pathway: str, level: str) -> List[str]:
+    md_path = get_md_path(pathway)
     level_block = extract_level_block(md_path, level)
     if not level_block:
-        st.error(f"Level '{level}' not found in {md_path.name}. Add a heading like: `## {level}`")
-        if st.button("Back"):
-            set_page("intro")
-            st.rerun()
+        return []
+    return list_projects_in_level(level_block)
+
+
+# -------------------- UI PAGES --------------------
+
+def page_select() -> None:
+    st.markdown(f"# {APP_TITLE}\n## {APP_SUBTITLE}")
+    st.caption("NYP ITI123 Application Development Project")
+
+    if LOGO_PATH.exists():
+        st.image(str(LOGO_PATH), width=120)
+
+    st.markdown("---")
+
+    st.subheader("Chapter Meeting Details")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.session_state.speaker_name = st.text_input("Speaker Name", value=st.session_state.speaker_name, placeholder="e.g., Oscar Zhu")
+    with c2:
+        st.session_state.evaluator_name = st.text_input(
+            "Evaluator Name", value=st.session_state.evaluator_name, placeholder="e.g., Lee Ching Yuh"
+        )
+    with c3:
+        st.session_state.meeting_date = st.date_input("Date of Chapter Meeting", value=st.session_state.meeting_date)
+
+    st.session_state.speech_title = st.text_input(
+        "Speech Title", value=st.session_state.speech_title, placeholder="e.g., Living with Dignity or Charity"
+    )
+
+    st.markdown("---")
+    st.subheader("Select Project")
+
+    pathway = st.selectbox("Select Pathway", list(PATHWAY_FILES.keys()), index=list(PATHWAY_FILES.keys()).index(st.session_state.pathway))
+    level = st.selectbox("Select Level", LEVELS, index=LEVELS.index(st.session_state.level))
+
+    # Update state
+    st.session_state.pathway = pathway
+    st.session_state.level = level
+
+    md_path = get_md_path(pathway)
+    if not md_path.exists():
+        st.error(f"Markdown file not found for '{pathway}'. Expected: {md_path}")
+        st.stop()
+
+    available_projects = read_available_projects(pathway, level)
+    if not available_projects:
+        st.warning(
+            f"No projects were found for **{pathway} → {level}** in `{md_path.name}`.\n\n"
+            "Add headings in your markdown like: `### Project: <Project Name>` under the correct level."
+        )
+        st.caption(f"Using file: {md_path}")
+        st.stop()
+
+    # Keep selected project valid
+    if st.session_state.project not in available_projects:
+        st.session_state.project = available_projects[0]
+
+    project = st.selectbox("Select Project", available_projects, index=available_projects.index(st.session_state.project))
+    st.session_state.project = project
+
+    st.caption(f"Using file: {md_path}")
+
+    col_a, col_b = st.columns([1, 3])
+    with col_a:
+        if st.button("Get Details", type="primary"):
+            go("load")
+
+    with col_b:
+        st.info("After you click **Get Details**, the app will load project details on the next page.")
+
+
+def page_load() -> None:
+    st.markdown("# Loading project")
+    st.caption("Please wait... preparing your project (minimum 3 seconds).")
+
+    # progress bar for at least ~3 seconds
+    p = st.progress(0)
+    for i in range(30):
+        time.sleep(0.1)
+        p.progress((i + 1) / 30)
+
+    pathway = st.session_state.pathway
+    level = st.session_state.level
+    project = st.session_state.project
+
+    md_path = get_md_path(pathway)
+    level_block = extract_level_block(md_path, level)
+    if not level_block:
+        st.error(f"❌ Level '{level}' not found in {md_path.name}.")
         st.stop()
 
     proj_block = extract_project_block(level_block, project)
     if not proj_block:
         st.error(
-            f"'{project}' was not found under {level} for '{pathway}'. "
-            "Please select a different project or add it into the markdown file."
+            f"❌ '{project}' was not found under {level} for the '{pathway}' pathway.\n\n"
+            "Please select the correct pathway/level OR add this project into the markdown file."
         )
-        with st.expander("Projects found in this pathway + level"):
-            st.write(list_projects_in_level(md_path, level))
-        if st.button("Back"):
-            set_page("intro")
-            st.rerun()
+        available = list_projects_in_level(level_block)
+        if available:
+            st.caption("Projects found in this pathway + level:")
+            st.write(available)
         st.stop()
 
-    level_focus = extract_level_focus(level_block) or "Not found"
-    purpose = extract_field(proj_block, "Purpose") or "Not found"
+    # Store details
+    st.session_state.level_focus = extract_level_focus(level_block) or "Not found"
+    st.session_state.purpose = extract_field(proj_block, "Purpose") or "Not found"
+
     speech_len = (
         extract_field(proj_block, "Speech length (optional)")
         or extract_field(proj_block, "Speech length")
         or "Not found"
     )
+    st.session_state.speech_len = speech_len
 
-    st.session_state.project_details.update(
-        {
-            "level_focus": level_focus,
-            "purpose": purpose,
-            "speech_len": speech_len,
-        }
-    )
-
-    set_page("evaluation")
-    st.rerun()
+    go("form")
 
 
-# ==================== Step 3: Evaluation Form ====================
-elif page == "evaluation":
-    d = st.session_state.get("project_details", {})
-    meeting = st.session_state.get("meeting", {})
-
-    st.subheader("Project Details")
-
+def _render_project_details_card() -> None:
     with st.container(border=True):
-        st.markdown(f"**Pathway**: {d.get('pathway','')}")
-        st.markdown(f"**Level**: {d.get('level','')}")
-        st.markdown(f"**Project**: {d.get('project','')}")
+        st.markdown("### Pathway")
+        st.write(st.session_state.pathway)
+
         st.markdown("---")
-        st.markdown("**Level focus**")
-        st.write(d.get("level_focus", ""))
+        st.markdown("### Level focus")
+        st.write(st.session_state.level_focus)
+
         st.markdown("---")
-        st.markdown("**Purpose**")
-        st.write(d.get("purpose", ""))
+        st.markdown("### Purpose")
+        st.write(st.session_state.purpose)
+
         st.markdown("---")
-        st.markdown("**Speech length**")
-        st.write(d.get("speech_len", ""))
+        st.markdown("### Speech length")
+        st.write(st.session_state.speech_len)
 
-    st.write("---")
 
-    st.subheader("Rubric Ratings (1–5)")
-    st.caption("Rule: ratings 4–5 → Strengths, ratings 1–3 → Areas for improvement. Default is 3.")
+def _render_criteria_expander() -> str:
+    """Returns a text blob of the criteria (used for CrewAI context)."""
+    lines = []
 
-    with st.expander("View Evaluation Criteria (Ice Breaker)"):
-        for crit, mapping in SPEECH_EVALUATION_CRITERIA.items():
-            st.markdown(f"### {crit}")
-            for s in [5, 4, 3, 2, 1]:
-                st.markdown(f"**{s}** — {mapping[s]}")
+    with st.expander("View Evaluation Criteria", expanded=False):
+        st.markdown("### Evaluation Criteria")
+        st.caption("These descriptions help you interpret each rating (1–5).")
 
-    # header row
-    h1, h2, h3 = st.columns([2.2, 2.3, 3.5])
+        for crit in RUBRIC_NAMES:
+            st.markdown(f"**{crit}**")
+            for score in [5, 4, 3, 2, 1]:
+                st.write(f"{score} — {SPEECH_EVALUATION_CRITERIA[crit][score]}")
+            st.markdown("---")
+
+    # Build criteria text for AI
+    for crit in RUBRIC_NAMES:
+        lines.append(f"{crit}:")
+        for score in [5, 4, 3, 2, 1]:
+            lines.append(f"  {score} - {SPEECH_EVALUATION_CRITERIA[crit][score]}")
+        lines.append("")
+
+    return "\n".join(lines).strip()
+
+
+def _render_rubric_table() -> Tuple[List[str], List[str], int]:
+    """Renders one row per criterion using columns; returns strengths, improvements, total score."""
+
+    st.markdown("## Rubric Ratings (1–5)")
+    st.caption("Rule: ratings 4–5 → Strengths, ratings 1–3 → Areas for improvement.")
+
+    # Header row
+    h1, h2, h3 = st.columns([2.4, 2.6, 3.0])
     with h1:
         st.markdown("**Criteria**")
     with h2:
         st.markdown("**Rating (1–5)**")
-        st.caption("5 4 3 2 1")
     with h3:
         st.markdown("**Comment**")
 
-    ratings: dict[str, int] = {}
-    comments: dict[str, str] = {}
+    st.markdown("---")
 
-    for crit in SPEECH_EVALUATION_CRITERIA.keys():
-        c1, c2, c3 = st.columns([2.2, 2.3, 3.5])
+    strengths: List[str] = []
+    improvements: List[str] = []
+
+    for name in RUBRIC_NAMES:
+        c1, c2, c3 = st.columns([2.4, 2.6, 3.0])
         with c1:
-            st.markdown(f"**{crit}**")
+            st.markdown(f"**{name}**")
         with c2:
-            # default rating = 3
-            r = st.radio(
-                label=f"rating_{crit}",
-                options=[5, 4, 3, 2, 1],
-                index=2,
+            key = f"score_{name}"
+            default = int(st.session_state.rubric_scores.get(name, 3))
+            st.session_state.rubric_scores[name] = st.radio(
+                label=f"{name} rating",
+                options=[1, 2, 3, 4, 5],
+                index=[1, 2, 3, 4, 5].index(default),
                 horizontal=True,
                 label_visibility="collapsed",
-                key=f"rate_{crit}",
+                key=key,
             )
         with c3:
-            cm = st.text_input(
-                label=f"comment_{crit}",
-                value="",
-                placeholder="Optional (short notes)",
+            ckey = f"comment_{name}"
+            st.session_state.rubric_comments[name] = st.text_area(
+                label=f"{name} comment",
+                value=st.session_state.rubric_comments.get(name, ""),
+                placeholder="Optional short comment...",
+                height=56,
                 label_visibility="collapsed",
-                key=f"comment_{crit}",
+                key=ckey,
             )
-        ratings[crit] = int(r)
-        comments[crit] = cm.strip()
 
-    total = sum(ratings.values())
-    label = score_label(total)
+        score = int(st.session_state.rubric_scores[name])
+        if score >= 4:
+            strengths.append(f"{name} ({score}/5)")
+        else:
+            improvements.append(f"{name} ({score}/5)")
 
-    st.write("---")
-    st.subheader("Score Summary")
-    st.markdown(f"**Total accumulated score:** {total} / 40")
-    if label:
-        st.markdown(f"**Overall band:** {label}")
+    total_score = sum(int(st.session_state.rubric_scores[n]) for n in RUBRIC_NAMES)
+    return strengths, improvements, total_score
 
-    st.markdown("**Legend**")
-    for lo, hi, lab in SCORE_LEGEND:
-        st.markdown(f"- **{lo}–{hi}** → {lab}")
 
-    strengths = [f"{k} ({v}/5)" for k, v in ratings.items() if v >= 4]
-    improvements = [f"{k} ({v}/5)" for k, v in ratings.items() if v <= 3]
+def _score_label(total: int) -> str:
+    if total >= 32:
+        return "Outstanding"
+    if total >= 24:
+        return "Exceed Expectation of Speech Project"
+    if total >= 16:
+        return "Meets Minimum Expectation of Speech Project"
+    return "Needs Improvement"
 
-    cA, cB = st.columns(2)
-    with cA:
-        st.markdown("### Strengths (4–5)")
+
+def page_form() -> None:
+    st.markdown("# Evaluation Form")
+
+    st.subheader("Project Details")
+    _render_project_details_card()
+
+    st.markdown("---")
+
+    criteria_text = _render_criteria_expander()
+
+    strengths, improvements, total_score = _render_rubric_table()
+    label = _score_label(total_score)
+
+    st.markdown("---")
+
+    # Strengths vs Improvements + total score + legend
+    left, right = st.columns(2)
+    with left:
+        st.markdown("## Strengths (4–5)")
         if strengths:
-            st.write("\n".join([f"- {x}" for x in strengths]))
+            st.write("\n".join([f"• {s}" for s in strengths]))
         else:
-            st.write("- (none selected)")
+            st.write("• (none selected)")
 
-    with cB:
-        st.markdown("### Areas for Improvement (1–3)")
+    with right:
+        st.markdown("## Areas for Improvement (1–3)")
         if improvements:
-            st.write("\n".join([f"- {x}" for x in improvements]))
+            st.write("\n".join([f"• {s}" for s in improvements]))
         else:
-            st.write("- (none selected)")
+            st.write("• (none selected)")
 
-    st.write("---")
-    st.subheader("General Comments – By Project Speech Evaluator")
+    st.markdown(f"### Total score: **{total_score}/40** — **{label}**")
+    with st.expander("Score Legend", expanded=False):
+        for line in SCORE_LEGEND:
+            st.write(f"• {line}")
 
-    gc1, gc2 = st.columns(2)
-    with gc1:
-        excelled = st.text_area("✅ You excelled at:", height=120, placeholder="e.g., Clear structure, strong eye contact…")
-    with gc2:
-        work_on = st.text_area("🛠️ You may want to work on:", height=120, placeholder="e.g., Vary pace, add stronger gestures…")
+    st.markdown("---")
 
-    challenge = st.text_area("🎯 To challenge yourself:", height=120, placeholder="e.g., Try a stronger opening hook next time…")
+    # General comments
+    st.markdown("## General Comments – By Project Speech Evaluator")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.session_state.excelled = st.text_area(
+            "✅ You excelled at:",
+            value=st.session_state.excelled,
+            height=120,
+            placeholder="e.g., Clear structure, strong eye contact...",
+        )
+    with c2:
+        st.session_state.work_on = st.text_area(
+            "🔧 You may want to work on:",
+            value=st.session_state.work_on,
+            height=120,
+            placeholder="e.g., Vary pace, add stronger gestures...",
+        )
 
-    st.write("---")
-    st.subheader("Evaluator Notes (input for CrewAI)")
-    notes = st.text_area("Paste your rough notes (bullet points ok):", height=160)
+    st.session_state.challenge = st.text_area(
+        "🎯 To challenge yourself:",
+        value=st.session_state.challenge,
+        height=120,
+        placeholder="e.g., Try a stronger opening hook next time...",
+    )
 
-    # Build criteria text for CrewAI
-    criteria_lines = []
-    for crit, r in ratings.items():
-        definition = SPEECH_EVALUATION_CRITERIA[crit].get(r, "")
-        cm = comments.get(crit, "")
-        if cm:
-            criteria_lines.append(f"- {crit}: {r}/5 — {definition} (Comment: {cm})")
-        else:
-            criteria_lines.append(f"- {crit}: {r}/5 — {definition}")
-    criteria_text = "\n".join(criteria_lines)
+    st.markdown("---")
 
-    notes_payload = "\n".join(
-        [
-            f"Speaker: {meeting.get('speaker','')}",
-            f"Evaluator: {meeting.get('evaluator','')}",
-            f"Date: {meeting.get('meeting_date','')}",
-            f"Speech title: {meeting.get('speech_title','')}",
-            "",
-            "Rubric ratings summary:",
-            criteria_text,
-            "",
-            f"Total score: {total}/40 ({label})" if label else f"Total score: {total}/40",
-            "",
-            "General comments (drafted by evaluator):",
-            f"You excelled at: {excelled}",
-            f"You may want to work on: {work_on}",
-            f"To challenge yourself: {challenge}",
-            "",
-            "Additional evaluator notes:",
-            notes,
-        ]
-    ).strip()
+    # Evaluator notes for AI
+    st.markdown("## Evaluator Notes (optional — input for CrewAI)")
+    st.caption(
+        "Use this box for any extra raw notes you captured during the speech. "
+        "If you already filled the **General Comments** and rubric, this can be left blank."
+    )
 
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        if st.button("Back", key="back_eval"):
-            set_page("intro")
-            st.rerun()
+    st.session_state.notes = st.text_area(
+        "Paste your rough notes (bullet points ok):",
+        value=st.session_state.notes,
+        height=160,
+        placeholder="e.g., Opening story was engaging; watch pacing in middle; nice callback at end...",
+    )
 
-    with col2:
+    st.markdown("---")
+
+    # Navigation + generation
+    col_l, col_r = st.columns([1, 2])
+    with col_l:
+        if st.button("Back"):
+            go("select")
+
+    with col_r:
         if st.button("Generate Evaluation Draft (CrewAI)", type="primary"):
-            if not notes_payload.strip():
-                st.warning("Please enter at least some notes.")
+            # Validate: require at least SOME content in rubric comments/general comments/notes
+            any_comment = any(safe_text(v) for v in st.session_state.rubric_comments.values())
+            any_general = any(
+                [
+                    safe_text(st.session_state.excelled),
+                    safe_text(st.session_state.work_on),
+                    safe_text(st.session_state.challenge),
+                    safe_text(st.session_state.notes),
+                ]
+            )
+            if not (any_comment or any_general):
+                st.warning("Please add at least one comment (rubric comment, general comment, or notes) before generating.")
                 st.stop()
 
-            st.session_state.pending_crewai = {
-                "notes_payload": notes_payload,
-                "pathway": d.get("pathway", ""),
-                "level": d.get("level", ""),
-                "project": d.get("project", ""),
-                "level_focus": d.get("level_focus", ""),
-                "purpose": d.get("purpose", ""),
-                "speech_len": d.get("speech_len", ""),
+            # Build notes payload for CrewAI
+            speaker = safe_text(st.session_state.speaker_name)
+            evaluator = safe_text(st.session_state.evaluator_name)
+            date_str = str(st.session_state.meeting_date) if st.session_state.meeting_date else ""
+            speech_title = safe_text(st.session_state.speech_title)
+
+            rubric_lines = []
+            for name in RUBRIC_NAMES:
+                sc = int(st.session_state.rubric_scores[name])
+                cm = safe_text(st.session_state.rubric_comments.get(name, ""))
+                if cm:
+                    rubric_lines.append(f"- {name}: {sc}/5 — {cm}")
+                else:
+                    rubric_lines.append(f"- {name}: {sc}/5")
+
+            notes_payload = "\n".join(
+                [
+                    f"Speaker: {speaker}",
+                    f"Evaluator: {evaluator}",
+                    f"Meeting date: {date_str}",
+                    f"Speech title: {speech_title}",
+                    "",
+                    "Rubric ratings:",
+                    *rubric_lines,
+                    "",
+                    "General comments:",
+                    f"- You excelled at: {safe_text(st.session_state.excelled)}",
+                    f"- You may want to work on: {safe_text(st.session_state.work_on)}",
+                    f"- To challenge yourself: {safe_text(st.session_state.challenge)}",
+                    "",
+                    "Extra notes (optional):",
+                    safe_text(st.session_state.notes),
+                ]
+            ).strip()
+
+            st.session_state.pending = {
+                "notes": notes_payload,
+                "pathway": st.session_state.pathway,
+                "level": st.session_state.level,
+                "project": st.session_state.project,
+                "level_focus": st.session_state.level_focus,
+                "purpose": st.session_state.purpose,
+                "speech_len": st.session_state.speech_len,
                 "criteria_text": criteria_text,
-                "total_score": total,
+                "strengths": strengths,
+                "improvements": improvements,
+                "total_score": total_score,
                 "score_label": label,
+                "speaker_name": speaker,
+                "evaluator_name": evaluator,
+                "meeting_date": date_str,
+                "speech_title": speech_title,
             }
-            set_page("draft_loading")
-            st.rerun()
+
+            go("draft_loading")
 
 
-# ==================== Step 4A: Draft Loading ====================
-elif page == "draft_loading":
-    st.subheader("Generating evaluation draft")
-    min3s_progress("Please wait… preparing your draft (minimum 3 seconds).")
+def page_draft_loading() -> None:
+    st.markdown("# Generating evaluation draft")
+    st.caption("Please wait... preparing your draft (minimum 3 seconds).")
 
-    pending = st.session_state.get("pending_crewai", {})
+    p = st.progress(0)
+    for i in range(30):
+        time.sleep(0.1)
+        p.progress((i + 1) / 30)
 
+    pending = st.session_state.get("pending", {})
     if not pending:
-        st.error("Nothing to generate yet. Please go back and fill the evaluation form.")
-        if st.button("Back"):
-            set_page("evaluation")
-            st.rerun()
+        st.error("Something went wrong: no pending request found. Please go back and generate again.")
         st.stop()
 
     if run_crewai_eval is None:
-        output = "CrewAI module failed to import.\n\n" + (CREWAI_IMPORT_ERROR or "")
-    else:
-        with st.spinner("Running CrewAI…"):
-            output = run_crewai_eval(
-                notes=pending.get("notes_payload", ""),
-                pathway=pending.get("pathway", ""),
-                level=pending.get("level", ""),
-                project=pending.get("project", ""),
-                level_focus=pending.get("level_focus", ""),
-                purpose=pending.get("purpose", ""),
-                speech_len=pending.get("speech_len", ""),
-                criteria_text=pending.get("criteria_text", ""),
-                total_score=pending.get("total_score", ""),
-                score_label=pending.get("score_label", ""),
-            )
+        st.session_state.draft_md = "CrewAI module failed to import.\n\n" + (CREWAI_IMPORT_ERROR or "")
+        go("draft")
+        return
 
-    st.session_state.crewai_output = output
-    set_page("draft")
-    st.rerun()
+    with st.spinner("Running CrewAI..."):
+        # NOTE: we pass named args that crewai_eval.py supports (and can safely ignore extras via **kwargs).
+        output = run_crewai_eval(
+            notes=pending.get("notes", ""),
+            pathway=pending.get("pathway", ""),
+            level=pending.get("level", ""),
+            project=pending.get("project", ""),
+            level_focus=pending.get("level_focus", ""),
+            purpose=pending.get("purpose", ""),
+            speech_len=pending.get("speech_len", ""),
+            criteria_text=pending.get("criteria_text", ""),
+            strengths=pending.get("strengths", []),
+            improvements=pending.get("improvements", []),
+            total_score=pending.get("total_score", 0),
+            score_label=pending.get("score_label", ""),
+            speaker_name=pending.get("speaker_name", ""),
+            evaluator_name=pending.get("evaluator_name", ""),
+            meeting_date=pending.get("meeting_date", ""),
+            speech_title=pending.get("speech_title", ""),
+        )
+
+    st.session_state.draft_md = output or ""
+    go("draft")
 
 
-# ==================== Step 4B: Draft & Export ====================
-elif page == "draft":
-    output = st.session_state.get("crewai_output", "")
-    if not output:
-        st.warning("No draft found yet. Generate one first.")
+def page_draft() -> None:
+    st.markdown("# Draft & Export")
 
-    st.subheader("Draft & Export")
+    md = st.session_state.get("draft_md", "").strip()
+    if not md:
+        st.warning("No draft found yet. Please go back and generate one.")
+        if st.button("Back"):
+            go("form")
+        st.stop()
 
-    # Print-friendly container
-    st.markdown(
-        """
-        <style>
-          /* slightly smaller overall look */
-          .block-container { max-width: 860px; padding-top: 1.6rem; }
-          @media print { .stButton, .stDownloadButton, header, footer { display:none !important; } }
-        </style>
-        """,
-        unsafe_allow_html=True,
+    st.subheader("Evaluation Draft")
+    st.markdown(md)
+
+    st.markdown("---")
+    st.subheader("Export")
+
+    filename_base = "evaluation_draft"
+    if safe_text(st.session_state.speaker_name):
+        filename_base = safe_text(st.session_state.speaker_name).replace(" ", "_") + "_evaluation"
+
+    # Markdown download
+    st.download_button(
+        "Download Markdown (.md)",
+        data=md.encode("utf-8"),
+        file_name=f"{filename_base}.md",
+        mime="text/markdown",
     )
 
-    with st.container(border=True):
-        st.markdown("### Evaluation Draft")
-        st.markdown(output if output else "(empty)")
+    # Print-friendly HTML download (then browser Print -> Save as PDF)
+    html = (
+        "<html><head><meta charset='utf-8'>"
+        "<style>body{font-family:Arial,Helvetica,sans-serif;max-width:800px;margin:24px auto;line-height:1.5}"
+        "pre{white-space:pre-wrap;font-family:Consolas,monospace;background:#f6f8fa;padding:12px;border-radius:8px}"
+        "</style></head><body>"
+        f"<h1>{APP_TITLE} - Draft</h1>"
+        "<pre>" + (md.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")) + "</pre>"
+        "</body></html>"
+    )
 
-    title = "Toastmasters Evaluation Draft"
-    md_bytes = (output or "").encode("utf-8")
-    html_doc = make_printable_html(title=title, body_markdown=output or "")
+    st.download_button(
+        "Download Print-HTML (.html)",
+        data=html.encode("utf-8"),
+        file_name=f"{filename_base}.html",
+        mime="text/html",
+    )
+    st.caption("For PDF (Option A): open the HTML → Print → Save as PDF.")
 
-    c1, c2, c3 = st.columns([1, 1, 1])
-    with c1:
+    # Direct PDF download
+    pdf = pdf_bytes_from_markdown(md_text=md, title=f"{APP_TITLE} - Draft")
+    if pdf:
         st.download_button(
-            "Download Markdown (.md)",
-            data=md_bytes,
-            file_name="evaluation_draft.md",
-            mime="text/markdown",
+            "Download PDF (.pdf)",
+            data=pdf,
+            file_name=f"{filename_base}.pdf",
+            mime="application/pdf",
         )
-    with c2:
-        st.download_button(
-            "Download Print-HTML (.html)",
-            data=html_doc.encode("utf-8"),
-            file_name="evaluation_draft.html",
-            mime="text/html",
+        st.caption("PDF (Option B): generated directly by the app (ReportLab).")
+    else:
+        st.info(
+            "Direct PDF download is disabled because `reportlab` is not installed in this environment. "
+            "Add `reportlab` to your `requirements.txt` and redeploy."
         )
-    with c3:
-        st.caption("For PDF: open the HTML → Print → Save as PDF")
 
-    st.write("---")
-
-    colA, colB = st.columns([1, 1])
-    with colA:
-        if st.button("Back to Evaluation"):
-            set_page("evaluation")
-            st.rerun()
-    with colB:
-        if st.button("Start New Evaluation"):
-            st.session_state.clear()
-            st.rerun()
+    st.markdown("---")
+    if st.button("Back"):
+        go("form")
 
 
-# Safety fallback
-else:
-    set_page("intro")
-    st.rerun()
+# -------------------- MAIN --------------------
+
+def main() -> None:
+    st.set_page_config(page_title=APP_TITLE, page_icon="☕", layout="centered")
+    init_state()
+
+    page = st.session_state.page
+    step_header(page)
+
+    if page == "select":
+        page_select()
+    elif page == "load":
+        page_load()
+    elif page == "form":
+        page_form()
+    elif page == "draft_loading":
+        page_draft_loading()
+    elif page == "draft":
+        page_draft()
+    else:
+        st.session_state.page = "select"
+        page_select()
+
+
+if __name__ == "__main__":
+    main()

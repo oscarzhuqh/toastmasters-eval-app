@@ -1,19 +1,79 @@
+"""CrewAI evaluation generator for Toastmasters Evaluation Assistant (T.E.A.).
+
+Designed to be robust:
+- Reads API key/model from env vars or Streamlit secrets.
+- Attempts to use CrewAI.
+- If CrewAI isn't available or fails due to version mismatches, falls back to a single LLM call.
+
+App expects:
+    from crewai_eval import run_crewai_eval
+"""
+
+from __future__ import annotations
+
 import os
+import traceback
+from typing import Optional
 
-# CrewAI is optional. If not installed, we fall back to a simple OpenAI call.
 
+def _get_setting(key: str, default: str = "") -> str:
+    """Read from Streamlit secrets first (if available), else env."""
+    value = ""
 
-def _get_setting(name: str, default: str = "") -> str:
-    """Get from env first, then Streamlit secrets if available."""
-    val = os.getenv(name, default)
+    # Streamlit secrets (works on Streamlit Cloud and locally with .streamlit/secrets.toml)
     try:
         import streamlit as st  # type: ignore
 
-        if hasattr(st, "secrets") and name in st.secrets:
-            val = str(st.secrets[name])
+        if hasattr(st, "secrets") and key in st.secrets:
+            value = str(st.secrets[key]).strip()
     except Exception:
         pass
-    return (val or "").strip()
+
+    if not value:
+        value = str(os.getenv(key, default)).strip()
+
+    return value
+
+
+def _fallback_llm(prompt: str, api_key: str, model: str) -> str:
+    """Fallback using the OpenAI Python SDK (if installed)."""
+    try:
+        from openai import OpenAI  # type: ignore
+
+        client = OpenAI(api_key=api_key)
+
+        # Newer SDKs: Responses API
+        try:
+            resp = client.responses.create(
+                model=model,
+                input=prompt,
+            )
+            # `output_text` is a convenience on newer SDKs
+            text = getattr(resp, "output_text", None)
+            if text:
+                return str(text).strip()
+            return str(resp).strip()
+        except Exception:
+            # Older: Chat Completions API
+            chat = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a Toastmasters speech evaluation assistant.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.4,
+            )
+            return (chat.choices[0].message.content or "").strip()
+
+    except Exception as e:
+        return (
+            "CrewAI failed and OpenAI fallback also failed.\n\n"
+            f"Fallback error: {e}\n\n"
+            "Tip: Ensure OPENAI_API_KEY is set in Streamlit secrets or environment variables."
+        )
 
 
 def run_crewai_eval(
@@ -26,108 +86,140 @@ def run_crewai_eval(
     purpose: str,
     speech_len: str,
     criteria_text: str = "",
-    total_score=None,
-    score_label: str = "",
+    speaker_name: str = "",
+    evaluator_name: str = "",
+    meeting_date: str = "",
+    speech_title: str = "",
 ) -> str:
-    """Generate a structured Toastmasters evaluation draft (markdown)."""
+    """Generate an editable evaluation draft.
 
-    api_key = _get_setting("OPENAI_API_KEY")
+    Returns a single markdown string.
+    """
+
+    api_key = _get_setting("OPENAI_API_KEY", "")
     model = _get_setting("OPENAI_MODEL", "gpt-4o-mini")
 
-    # Build a single, strong context block.
-    score_line = ""
-    if total_score is not None and str(total_score).strip() != "":
-        score_line = f"Overall rubric score: {total_score}/40"
-        if score_label:
-            score_line += f" ({score_label})"
+    if not api_key:
+        return (
+            "❌ Missing OPENAI_API_KEY.\n\n"
+            "Add it in Streamlit secrets (recommended):\n"
+            "- Streamlit Cloud: App → Settings → Secrets\n"
+            "- Local: create .streamlit/secrets.toml\n\n"
+            "Example secrets.toml:\n"
+            "OPENAI_API_KEY = \"sk-...\"\n"
+            "OPENAI_MODEL = \"gpt-4o-mini\"\n"
+        )
 
-    context = f"""
-You are a Toastmasters evaluation draft assistant.
+    prompt = f"""
+You are the Toastmasters Evaluation Assistant (T.E.A.).
 
-Write a helpful, encouraging evaluation draft that is:
-- aligned to the selected Pathways project (purpose + level focus)
-- grounded in the rubric ratings + comments provided
-- structured like a real Toastmasters evaluation (strengths, improvements, challenge, close)
+Goal:
+Turn the evaluator's rubric ratings + rough notes into a clear, kind, and project-aligned evaluation draft.
 
-Project context
+Meeting details:
+- Speaker: {speaker_name or "(not provided)"}
+- Evaluator: {evaluator_name or "(not provided)"}
+- Date: {meeting_date or "(not provided)"}
+- Speech Title: {speech_title or "(not provided)"}
+
+Pathways context:
 - Pathway: {pathway}
 - Level: {level}
 - Project: {project}
-- Purpose: {purpose}
-- Speech length: {speech_len}
-- Level focus: {level_focus}
-{score_line}
+- Project Purpose: {purpose}
+- Level Focus: {level_focus}
+- Speech length target: {speech_len}
 
-Rubric criteria reference (for evaluator understanding):
-{criteria_text}
+Evaluation criteria reference (for the evaluator to stay consistent):
+{criteria_text.strip() or "(No criteria text provided)"}
 
-Evaluator inputs (rubric ratings, comments, and notes):
+Evaluator input (rubric summary + comments + general notes):
 {notes}
 
-Requirements
-- Output MUST be markdown.
-- Use clear headings.
-- Keep it printable (no huge tables).
-- Do not invent facts that aren't in the notes.
+Write the output as a structured evaluation draft in plain English.
+
+Required structure:
+1) Short opening (1-2 sentences) that references the project purpose.
+2) Strengths section (bullets) - must map back to rubric strengths.
+3) Areas for improvement (bullets) - must map back to rubric areas.
+4) One actionable challenge goal (1-2 sentences).
+5) Alignment check (3 bullets): show how the evaluation links to Purpose + Level focus.
+
+Rules:
+- Be specific (use examples where available), but do not invent details.
+- If details are missing, use "Based on the notes provided..." and keep it general.
+- Keep tone supportive and Toastmasters-appropriate.
+- Output Markdown only.
 """.strip()
 
-    # --- Try CrewAI first ---
+    # --- Try CrewAI ---
     try:
         from crewai import Agent, Task, Crew, Process  # type: ignore
 
-        # CrewAI usually needs a working LLM provider configured via env.
-        # We'll still run it; if the user hasn't configured, it will throw and we fall back.
+        # Some CrewAI versions provide an LLM helper. We'll try it, but degrade gracefully.
+        llm = None
+        try:
+            from crewai import LLM  # type: ignore
+
+            llm = LLM(model=model, api_key=api_key)
+        except Exception:
+            llm = None
+
         evaluator = Agent(
-            role="Toastmasters Speech Evaluator",
-            goal="Create an accurate, supportive, project-aligned evaluation draft",
-            backstory=(
-                "You are an experienced Toastmasters evaluator. You give specific, actionable feedback "
-                "and connect comments to the speech project purpose and skills."
-            ),
+            role="Speech Evaluator",
+            goal="Write a clear, supportive Toastmasters evaluation draft aligned to Pathways project goals.",
+            backstory="You are a seasoned Toastmasters evaluator who focuses on actionable feedback.",
+            llm=llm,  # if None, CrewAI may still read env vars
             verbose=False,
         )
 
-        task = Task(
-            description=context,
-            expected_output=(
-                "A markdown evaluation draft with sections: Overview, Strengths, Areas to Improve, "
-                "One Challenge, Suggested Next Steps, and a short Closing."
-            ),
+        alignment = Agent(
+            role="Alignment Checker",
+            goal="Ensure the draft explicitly aligns to Project Purpose and Level Focus.",
+            backstory="You ensure evaluations are objective, rubric-aligned, and project-relevant.",
+            llm=llm,
+            verbose=False,
+        )
+
+        draft_task = Task(
+            description=prompt,
+            expected_output="A complete markdown evaluation draft following the required structure.",
             agent=evaluator,
         )
 
+        check_task = Task(
+            description=(
+                "Review the evaluation draft and add/repair the 'Alignment check' section so it clearly "
+                "links to Project Purpose + Level focus. Keep everything concise and Markdown only."
+            ),
+            expected_output="The improved final markdown draft.",
+            agent=alignment,
+            context=[draft_task],
+        )
+
         crew = Crew(
-            agents=[evaluator],
-            tasks=[task],
+            agents=[evaluator, alignment],
+            tasks=[draft_task, check_task],
             process=Process.sequential,
             verbose=False,
         )
 
         result = crew.kickoff()
-        return str(result).strip() or "(No output returned by CrewAI.)"
+        # CrewAI may return a string or an object
+        if isinstance(result, str):
+            return result.strip()
+        # common attributes
+        for attr in ("raw", "output", "final_output"):
+            if hasattr(result, attr):
+                value = getattr(result, attr)
+                if value:
+                    return str(value).strip()
+        return str(result).strip()
 
     except Exception:
-        # --- Fallback: direct OpenAI call (if key exists) ---
-        if not api_key:
-            return (
-                "CrewAI/OpenAI is not configured yet.\n\n"
-                "Add `OPENAI_API_KEY` (and optionally `OPENAI_MODEL`) to Streamlit Secrets or environment variables, "
-                "then try again.\n\n"
-                "For now, your notes were captured successfully, but no AI draft can be generated without a key."
-            )
-
-        try:
-            from openai import OpenAI  # type: ignore
-
-            client = OpenAI(api_key=api_key)
-            resp = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": "You generate Toastmasters evaluation drafts in markdown."},
-                    {"role": "user", "content": context},
-                ],
-                temperature=0.5,
-            )
-            return (resp.choices[0].message.content or "").strip() or "(No output returned.)"
-        except Exception as e:
-            return f"Failed to generate draft. Error: {type(e).__name__}: {e}"
+        # --- Fallback ---
+        return (
+            _fallback_llm(prompt, api_key=api_key, model=model)
+            + "\n\n---\n"
+            + "*(Note: CrewAI failed in this environment, so the app used a direct LLM fallback.)*"
+        )
