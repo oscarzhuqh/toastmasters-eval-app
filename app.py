@@ -527,6 +527,63 @@ def make_pdf_bytes(title: str, body_text: str) -> bytes:
     return buf.getvalue()
 
 
+def extract_purpose_alignment(md: str) -> tuple[str, dict[str, bool]]:
+    """Extract a Purpose Alignment summary + checkbox checklist from the draft markdown.
+
+    Returns (summary, checks). If the section isn't present, falls back to simple heuristics.
+    """
+    md = md or ""
+    summary = ""
+    checks: dict[str, bool] = {
+        "Purpose clearly addressed": False,
+        "Level focus demonstrated": False,
+        "Feedback linked to evaluation criteria": False,
+        "Balanced commendations + improvements": False,
+        "Actionable next step provided": False,
+    }
+
+    # Locate the section
+    m = re.search(r"^##\s+Purpose\s+Alignment\s*$", md, flags=re.IGNORECASE | re.MULTILINE)
+    if m:
+        section = md[m.end():]
+        section = re.split(r"^##\s+", section, maxsplit=1, flags=re.MULTILINE)[0]
+        lines = [ln.rstrip() for ln in section.strip().splitlines()]
+
+        # Summary: first 1–2 non-empty lines before checklist
+        collected = []
+        for ln in lines:
+            if re.match(r"\s*-\s*\[(x| )\]", ln, flags=re.IGNORECASE):
+                break
+            if ln.strip() and not ln.strip().startswith("-"):
+                collected.append(ln.strip())
+            if len(collected) >= 2:
+                break
+        summary = " ".join(collected).strip()
+
+        # Checklist parsing
+        for ln in lines:
+            mm = re.match(r"\s*-\s*\[(x| )\]\s*(.+)\s*$", ln, flags=re.IGNORECASE)
+            if not mm:
+                continue
+            checked = mm.group(1).lower() == "x"
+            label = mm.group(2).strip().lower()
+            for k in list(checks.keys()):
+                kk = k.lower()
+                if kk in label or label in kk:
+                    checks[k] = checked
+
+    # Heuristic fallback (useful if model didn't include the section)
+    if not summary:
+        checks["Balanced commendations + improvements"] = (
+            "## Strengths" in md and "## Areas to Improve" in md
+        )
+        checks["Actionable next step provided"] = (
+            "## Suggested Next Steps" in md or "## One Challenge" in md
+        )
+
+    return summary, checks
+
+
 def render_header():
     logo_path = find_logo_path()
     h1, h2 = st.columns([1, 5], vertical_alignment="center")
@@ -757,6 +814,14 @@ if st.session_state.page == "draft":
         height=520,
         key="draft_editor",
     )
+
+    # Purpose-alignment indicator (for report screenshots)
+    align_summary, align_checks = extract_purpose_alignment(edited)
+    with st.expander("Purpose alignment indicator (auto)", expanded=False):
+        if align_summary:
+            st.caption(align_summary)
+        for label, checked in align_checks.items():
+            st.checkbox(label, value=checked, disabled=True)
 
     # Build filenames
     ts = time.strftime("%Y%m%d_%H%M%S")
