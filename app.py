@@ -525,6 +525,17 @@ def _build_test_notes_payload(base_pending: dict, test_case: dict) -> str:
     """Create a compact notes payload for canned tests (for evidence collection)."""
     # Keep this intentionally short and consistent for screenshots / report evidence.
     parts = []
+
+    # Include score summary inside the notes payload (so CrewAI can reference it)
+    # without requiring extra function parameters.
+    score = base_pending.get("total_score", None)
+    label = base_pending.get("score_label", "")
+    if score is not None or label:
+        score_line = f"Overall rubric score: {score}/40" if score is not None else "Overall rubric score: (not provided)"
+        if label:
+            score_line += f" ({label})"
+        parts.append(score_line)
+        parts.append("")
     parts.append("## Test Case")
     parts.append(f"- Name: {test_case.get('name','')}")
     parts.append(f"- Scenario: {test_case.get('scenario','')}")
@@ -593,13 +604,11 @@ def run_canned_tests_for_evidence(base_pending: dict) -> list[dict]:
                 purpose=base_pending.get("purpose", ""),
                 speech_len=base_pending.get("speech_len", ""),
                 criteria_text=base_pending.get("selected_criteria_text", ""),
-                total_score=base_pending.get("total_score", None),
-                score_label=base_pending.get("score_label", ""),
                 speech_title=base_pending.get("speech_title", ""),
             )
             results.append({"name": tc["name"], "status": "OK", "output": out, "notes": notes_payload})
         except Exception as e:
-            results.append({"name": tc["name"], "status": f"ERROR: {type(e).__name__}", "output": "", "notes": notes_payload})
+            results.append({"name": tc["name"], "status": f"ERROR: {type(e).__name__}: {e}", "output": "", "notes": notes_payload})
 
         prog.progress(i / len(tests), text=f"Running canned tests… {i}/{len(tests)}")
 
@@ -820,8 +829,19 @@ if st.session_state.page == "draft_loading":
         output = "CrewAI module failed to import.\n\n" + (CREWAI_IMPORT_ERROR or "")
     else:
         with st.spinner("Running CrewAI…"):
+            # Embed score summary into notes so CrewAI can reference it without
+            # requiring extra function parameters.
+            notes_payload = pending.get("notes_payload", "")
+            total_score = pending.get("total_score")
+            score_label = pending.get("score_label", "")
+            if total_score is not None or score_label:
+                score_line = f"Overall rubric score: {total_score}/40" if total_score is not None else "Overall rubric score: (not provided)"
+                if score_label:
+                    score_line += f" ({score_label})"
+                notes_payload = score_line + "\n\n" + notes_payload
+
             output = run_crewai_eval(
-                notes=pending.get("notes_payload", ""),
+                notes=notes_payload,
                 pathway=pending.get("pathway", ""),
                 level=pending.get("level", ""),
                 project=pending.get("project", ""),
@@ -829,8 +849,6 @@ if st.session_state.page == "draft_loading":
                 purpose=pending.get("purpose", ""),
                 speech_len=pending.get("speech_len", ""),
                 criteria_text=pending.get("criteria_text", ""),
-                total_score=pending.get("total_score"),
-                score_label=pending.get("score_label", ""),
             )
 
     st.session_state.crewai_output = output
@@ -936,7 +954,7 @@ if st.session_state.page == "draft":
 
 
     # ---------------- Mini Test Mode (Evidence for Final Report) ----------------
-    with st.expander("Mini Test Mode (Run 5 canned tests for evidence)", expanded=False):
+    with st.expander("🧪 Mini Test Mode (Run 5 canned tests for evidence)", expanded=False):
         st.write(
             "Runs 5 short, predefined test cases using the current selected project context. "
             "This helps you capture evidence (inputs + outputs) for your final report."
