@@ -518,6 +518,208 @@ def make_pdf_bytes(title: str, body_text: str) -> bytes:
     c.save()
     return buf.getvalue()
 
+# ------------------------------ Test Mode (Evidence) ------------------------------
+def _make_canned_tests() -> list[dict]:
+    """Small, deterministic test set to generate evaluation evidence for the final report."""
+    return [
+        {
+            "id": "T1",
+            "pathway": "Dynamic Leadership",
+            "level": "Level 3",
+            "project": "Ice Breaker",
+            "level_focus": "Establish a clear purpose, organize content, and practice speaking with confidence.",
+            "purpose": "Introduce a personal story and deliver a clear, organized speech.",
+            "speech_len": "4–6 minutes",
+            "speech_title": "My First Step",
+            "rubric_snapshot": "Mostly 4s with one 3 (Gestures).",
+            "notes_payload": (
+                "General Comments\n"
+                "- You excelled at: Clear structure, steady pace, warm tone.\n"
+                "- You may want to work on: Add stronger gestures and vary pauses.\n"
+                "- To challenge yourself: Use a sharper opening hook and one stronger closing line.\n\n"
+                "Rubric Summary\n"
+                "- Strengths (4–5): Clarity 4, Vocal Variety 4, Eye Contact 4, Audience Awareness 4, Comfort Level 4, Interest 4, Well Supported 4\n"
+                "- Improvements (1–3): Gestures 3\n"
+            ),
+            "total_score": 31,
+            "score_label": "Exceed Expectation of Speech Project",
+        },
+        {
+            "id": "T2",
+            "pathway": "Presentation Mastery",
+            "level": "Level 2",
+            "project": "Understanding Your Communication Style",
+            "level_focus": "Increase awareness of communication strengths and areas to improve.",
+            "purpose": "Demonstrate a personal communication style with examples.",
+            "speech_len": "5–7 minutes",
+            "speech_title": "How I Speak Under Pressure",
+            "rubric_snapshot": "Strong clarity and structure; weaker audience awareness.",
+            "notes_payload": (
+                "General Comments\n"
+                "- You excelled at: Clear explanations and logical flow.\n"
+                "- You may want to work on: Engage the audience more (questions / reactions).\n"
+                "- To challenge yourself: Add one short story to make the point memorable.\n\n"
+                "Rubric Summary\n"
+                "- Strengths (4–5): Clarity 5, Well Supported 4, Interest 4\n"
+                "- Improvements (1–3): Audience Awareness 3, Vocal Variety 3\n"
+            ),
+            "total_score": 28,
+            "score_label": "Exceed Expectation of Speech Project",
+        },
+        {
+            "id": "T3",
+            "pathway": "Engaging Humor",
+            "level": "Level 1",
+            "project": "Ice Breaker",
+            "level_focus": "Create connection and deliver an organized first speech.",
+            "purpose": "Share a humorous personal introduction.",
+            "speech_len": "4–6 minutes",
+            "speech_title": "The Day My GPS Betrayed Me",
+            "rubric_snapshot": "High interest, but pacing and vocal variety need work.",
+            "notes_payload": (
+                "General Comments\n"
+                "- You excelled at: Funny moments and relatable examples.\n"
+                "- You may want to work on: Slow down and add pauses for punchlines.\n"
+                "- To challenge yourself: Use a consistent callback to tie the story together.\n\n"
+                "Rubric Summary\n"
+                "- Strengths (4–5): Interest 5, Comfort Level 4\n"
+                "- Improvements (1–3): Vocal Variety 3, Clarity 3\n"
+            ),
+            "total_score": 24,
+            "score_label": "Exceed Expectation of Speech Project",
+        },
+        {
+            "id": "T4",
+            "pathway": "Dynamic Leadership",
+            "level": "Level 3",
+            "project": "Persuasive Speaking",
+            "level_focus": "Use evidence and structure to influence an audience.",
+            "purpose": "Persuade the audience to take a specific action.",
+            "speech_len": "5–7 minutes",
+            "speech_title": "Small Habits, Big Change",
+            "rubric_snapshot": "Well supported and clear; gestures and eye contact mixed.",
+            "notes_payload": (
+                "General Comments\n"
+                "- You excelled at: Strong evidence and clear call-to-action.\n"
+                "- You may want to work on: More eye contact with the left side of the room.\n"
+                "- To challenge yourself: Use gestures to emphasize 2–3 key points.\n\n"
+                "Rubric Summary\n"
+                "- Strengths (4–5): Well Supported 5, Clarity 4, Audience Awareness 4\n"
+                "- Improvements (1–3): Eye Contact 3, Gestures 3\n"
+            ),
+            "total_score": 27,
+            "score_label": "Exceed Expectation of Speech Project",
+        },
+        {
+            "id": "T5",
+            "pathway": "Presentation Mastery",
+            "level": "Level 3",
+            "project": "Connect with Your Audience",
+            "level_focus": "Deliver content that is audience-focused and engaging.",
+            "purpose": "Build rapport and adapt to audience response.",
+            "speech_len": "5–7 minutes",
+            "speech_title": "Speak So They Lean In",
+            "rubric_snapshot": "Audience awareness strong; needs tighter structure.",
+            "notes_payload": (
+                "General Comments\n"
+                "- You excelled at: Reading reactions and adapting examples.\n"
+                "- You may want to work on: Clearer signposting (3 main points).\n"
+                "- To challenge yourself: Keep each point to one message + one example.\n\n"
+                "Rubric Summary\n"
+                "- Strengths (4–5): Audience Awareness 5, Eye Contact 4, Interest 4\n"
+                "- Improvements (1–3): Clarity 3\n"
+            ),
+            "total_score": 26,
+            "score_label": "Exceed Expectation of Speech Project",
+        },
+    ]
+
+
+def _default_criteria_text() -> str:
+    """Use app rubric definitions if available; otherwise fall back to a short summary."""
+    # Try to build from SPEECH_EVALUATION_CRITERIA if defined in this app.py
+    crit = globals().get("SPEECH_EVALUATION_CRITERIA")
+    if isinstance(crit, dict) and crit:
+        parts = []
+        for name, levels in crit.items():
+            parts.append(f"{name}:")
+            if isinstance(levels, dict):
+                for k in sorted(levels.keys(), reverse=True):
+                    parts.append(f"  {k} - {levels[k]}")
+            parts.append("")
+        return "\n".join(parts).strip()
+    return (
+        "Evaluation criteria (summary): clarity, vocal variety, eye contact, gestures, "
+        "audience awareness, comfort level, interest, well supported."
+    )
+
+
+def _check_draft_structure(md: str) -> dict:
+    """Lightweight structural checks for reporting."""
+    checks = {
+        "has_strengths": bool(re.search(r"\bStrengths\b", md, re.I)),
+        "has_improvements": bool(re.search(r"\b(Area(s)? for Improvement|Improvements?)\b", md, re.I)),
+        "has_next_step": bool(re.search(r"\b(Next Step|Suggested Next)\b", md, re.I)),
+        "has_closing": bool(re.search(r"\b(Closing|Conclusion)\b", md, re.I)),
+    }
+    checks["score"] = sum(1 for v in checks.values() if v)
+    return checks
+
+
+def run_canned_tests(run_crewai_eval_func):
+    """Run 5 canned tests and return results (for evidence)."""
+    criteria_text = _default_criteria_text()
+    tests = _make_canned_tests()
+    results = []
+    for t in tests:
+        out = run_crewai_eval_func(
+            notes=t["notes_payload"],
+            pathway=t["pathway"],
+            level=t["level"],
+            project=t["project"],
+            level_focus=t["level_focus"],
+            purpose=t["purpose"],
+            speech_len=t["speech_len"],
+            criteria_text=criteria_text,
+            total_score=t["total_score"],
+            score_label=t["score_label"],
+            speech_title=t["speech_title"],
+        )
+        checks = _check_draft_structure(out or "")
+        results.append({**t, "criteria_text": criteria_text, "draft_md": out or "", "checks": checks})
+    return results
+
+
+def build_test_evidence_md(results: list[dict]) -> str:
+    lines = [
+        "# T.E.A. – Canned Test Evidence (5 runs)",
+        "",
+        "Purpose: Provide repeatable evidence that the end-to-end pipeline produces structured drafts aligned to retrieved context.",
+        "",
+    ]
+    for r in results:
+        c = r.get("checks", {})
+        lines += [
+            f"## {r['id']} — {r['pathway']} / {r['level']} / {r['project']}",
+            f"- Speech Title: {r.get('speech_title','')}",
+            f"- Total Score: {r.get('total_score','')} ({r.get('score_label','')})",
+            f"- Rubric Snapshot: {r.get('rubric_snapshot','')}",
+            f"- Structure Checks: Strengths={c.get('has_strengths')} | Improvements={c.get('has_improvements')} | NextStep={c.get('has_next_step')} | Closing={c.get('has_closing')} (score {c.get('score',0)}/4)",
+            "",
+            "### Input (Notes Payload)",
+            "```",
+            (r.get("notes_payload") or "").strip(),
+            "```",
+            "",
+            "### Output (Draft Excerpt)",
+            "```",
+            (r.get("draft_md") or "")[:1200].strip(),
+            "```",
+            "",
+        ]
+    return "\n".join(lines).strip() + "\n"
+
+
 
 def render_header():
     logo_path = find_logo_path()
@@ -812,6 +1014,67 @@ if st.session_state.page == "draft":
 
 
     st.caption(
+
+    with st.expander("🧪 Test Mode (Generate evidence for final report)", expanded=False):
+        st.caption("Runs 5 canned test cases through the same CrewAI pipeline to produce repeatable evidence. (May consume API credits.)")
+        if run_crewai_eval is None:
+            st.error("CrewAI module is not available. Fix import / requirements before running tests.")
+        else:
+            if st.button("Run 5 canned tests", use_container_width=True):
+                st.session_state.test_results = None
+                with st.spinner("Running canned tests (this may take a while)..."):
+                    prog = st.progress(0)
+                    results = []
+                    tests = _make_canned_tests()
+                    for i, t in enumerate(tests, start=1):
+                        # Run one test at a time for progress visibility
+                        one = run_crewai_eval(
+                            notes=t["notes_payload"],
+                            pathway=t["pathway"],
+                            level=t["level"],
+                            project=t["project"],
+                            level_focus=t["level_focus"],
+                            purpose=t["purpose"],
+                            speech_len=t["speech_len"],
+                            criteria_text=_default_criteria_text(),
+                            total_score=t["total_score"],
+                            score_label=t["score_label"],
+                            speech_title=t["speech_title"],
+                        )
+                        t_out = {**t, "draft_md": one or "", "checks": _check_draft_structure(one or "")}
+                        results.append(t_out)
+                        prog.progress(i / len(tests))
+                    st.session_state.test_results = results
+
+            results = st.session_state.get("test_results")
+            if results:
+                st.success(f"Completed {len(results)} canned tests.")
+                # Summary table (lightweight)
+                for r in results:
+                    c = r.get("checks", {})
+                    st.markdown(
+                        f"**{r['id']}** — {r['pathway']} / {r['level']} / {r['project']}  \\"
+                        f"Score: {r.get('total_score')} ({r.get('score_label')}) | "
+                        f"Structure checks: {c.get('score',0)}/4"
+                    )
+                evidence_md = build_test_evidence_md(results)
+                st.download_button(
+                    "⬇️ Download Test Evidence (Markdown)",
+                    data=evidence_md.encode("utf-8"),
+                    file_name="tea_canned_test_evidence.md",
+                    mime="text/markdown",
+                    use_container_width=True,
+                )
+                evidence_pdf = make_pdf_bytes("T.E.A. Canned Test Evidence", evidence_md)
+                if evidence_pdf:
+                    st.download_button(
+                        "⬇️ Download Test Evidence (PDF)",
+                        data=evidence_pdf,
+                        file_name="tea_canned_test_evidence.pdf",
+                        mime="application/pdf",
+                        use_container_width=True,
+                    )
+
         "PDF tip: you can download PDF directly, or open the downloaded HTML in Chrome/Edge, then use Print → Save as PDF. "
         "(This keeps formatting cleaner than copying from the app.)"
     )
@@ -1200,5 +1463,3 @@ if st.session_state.page == "draft":
                     del st.session_state[k]
             st.session_state.page = "select"
             st.rerun()
-
-
