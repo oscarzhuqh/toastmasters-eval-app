@@ -518,207 +518,123 @@ def make_pdf_bytes(title: str, body_text: str) -> bytes:
     c.save()
     return buf.getvalue()
 
-# ------------------------------ Test Mode (Evidence) ------------------------------
-def _make_canned_tests() -> list[dict]:
-    """Small, deterministic test set to generate evaluation evidence for the final report."""
+
+# ---------------------------- Mini test mode (evidence) ----------------------------
+
+def _build_test_notes_payload(base_pending: dict, test_case: dict) -> str:
+    """Create a compact notes payload for canned tests (for evidence collection)."""
+    # Keep this intentionally short and consistent for screenshots / report evidence.
+    parts = []
+    parts.append("## Test Case")
+    parts.append(f"- Name: {test_case.get('name','')}")
+    parts.append(f"- Scenario: {test_case.get('scenario','')}")
+    parts.append("")
+    parts.append("## Evaluator Notes (bullet points)")
+    parts.append(test_case.get("notes","").strip())
+    parts.append("")
+    # Include rubric summary if available (helps justify grounding)
+    rubric_summary = base_pending.get("notes_payload", "")  # already contains rubric + comments + general notes
+    if rubric_summary:
+        parts.append("## Rubric Inputs (from app)")
+        parts.append(rubric_summary.strip())
+        parts.append("")
+    return "\n".join(parts).strip()
+
+
+def _get_canned_tests() -> list[dict]:
     return [
         {
-            "id": "T1",
-            "pathway": "Dynamic Leadership",
-            "level": "Level 3",
-            "project": "Ice Breaker",
-            "level_focus": "Establish a clear purpose, organize content, and practice speaking with confidence.",
-            "purpose": "Introduce a personal story and deliver a clear, organized speech.",
-            "speech_len": "4–6 minutes",
-            "speech_title": "My First Step",
-            "rubric_snapshot": "Mostly 4s with one 3 (Gestures).",
-            "notes_payload": (
-                "General Comments\n"
-                "- You excelled at: Clear structure, steady pace, warm tone.\n"
-                "- You may want to work on: Add stronger gestures and vary pauses.\n"
-                "- To challenge yourself: Use a sharper opening hook and one stronger closing line.\n\n"
-                "Rubric Summary\n"
-                "- Strengths (4–5): Clarity 4, Vocal Variety 4, Eye Contact 4, Audience Awareness 4, Comfort Level 4, Interest 4, Well Supported 4\n"
-                "- Improvements (1–3): Gestures 3\n"
-            ),
-            "total_score": 31,
-            "score_label": "Exceed Expectation of Speech Project",
+            "name": "TC1 — Balanced, meeting-ready",
+            "scenario": "Clear structure, good engagement; minor pacing improvements.",
+            "notes": "- Strong opening hook and clear signposting\n- Good vocal variety; a few rushed lines in middle\n- Eye contact improved; occasional glance at notes\n- Recommendation: slow down for key message; end with stronger call-to-action",
         },
         {
-            "id": "T2",
-            "pathway": "Presentation Mastery",
-            "level": "Level 2",
-            "project": "Understanding Your Communication Style",
-            "level_focus": "Increase awareness of communication strengths and areas to improve.",
-            "purpose": "Demonstrate a personal communication style with examples.",
-            "speech_len": "5–7 minutes",
-            "speech_title": "How I Speak Under Pressure",
-            "rubric_snapshot": "Strong clarity and structure; weaker audience awareness.",
-            "notes_payload": (
-                "General Comments\n"
-                "- You excelled at: Clear explanations and logical flow.\n"
-                "- You may want to work on: Engage the audience more (questions / reactions).\n"
-                "- To challenge yourself: Add one short story to make the point memorable.\n\n"
-                "Rubric Summary\n"
-                "- Strengths (4–5): Clarity 5, Well Supported 4, Interest 4\n"
-                "- Improvements (1–3): Audience Awareness 3, Vocal Variety 3\n"
-            ),
-            "total_score": 28,
-            "score_label": "Exceed Expectation of Speech Project",
+            "name": "TC2 — Mostly strengths",
+            "scenario": "High confidence and strong delivery across most criteria.",
+            "notes": "- Confident posture; natural gestures\n- Excellent audience awareness; responded to reactions\n- Story examples well supported\n- Recommendation: add one more crisp summary sentence before closing",
         },
         {
-            "id": "T3",
-            "pathway": "Engaging Humor",
-            "level": "Level 1",
-            "project": "Ice Breaker",
-            "level_focus": "Create connection and deliver an organized first speech.",
-            "purpose": "Share a humorous personal introduction.",
-            "speech_len": "4–6 minutes",
-            "speech_title": "The Day My GPS Betrayed Me",
-            "rubric_snapshot": "High interest, but pacing and vocal variety need work.",
-            "notes_payload": (
-                "General Comments\n"
-                "- You excelled at: Funny moments and relatable examples.\n"
-                "- You may want to work on: Slow down and add pauses for punchlines.\n"
-                "- To challenge yourself: Use a consistent callback to tie the story together.\n\n"
-                "Rubric Summary\n"
-                "- Strengths (4–5): Interest 5, Comfort Level 4\n"
-                "- Improvements (1–3): Vocal Variety 3, Clarity 3\n"
-            ),
-            "total_score": 24,
-            "score_label": "Exceed Expectation of Speech Project",
+            "name": "TC3 — Needs clearer purpose linkage",
+            "scenario": "Feedback risks being generic; test whether output links back to project purpose/criteria.",
+            "notes": "- Many good points but need stronger linkage to project purpose\n- Improve: connect each improvement to a criterion\n- Suggest: include 1 challenge goal aligned to project objective",
         },
         {
-            "id": "T4",
-            "pathway": "Dynamic Leadership",
-            "level": "Level 3",
-            "project": "Persuasive Speaking",
-            "level_focus": "Use evidence and structure to influence an audience.",
-            "purpose": "Persuade the audience to take a specific action.",
-            "speech_len": "5–7 minutes",
-            "speech_title": "Small Habits, Big Change",
-            "rubric_snapshot": "Well supported and clear; gestures and eye contact mixed.",
-            "notes_payload": (
-                "General Comments\n"
-                "- You excelled at: Strong evidence and clear call-to-action.\n"
-                "- You may want to work on: More eye contact with the left side of the room.\n"
-                "- To challenge yourself: Use gestures to emphasize 2–3 key points.\n\n"
-                "Rubric Summary\n"
-                "- Strengths (4–5): Well Supported 5, Clarity 4, Audience Awareness 4\n"
-                "- Improvements (1–3): Eye Contact 3, Gestures 3\n"
-            ),
-            "total_score": 27,
-            "score_label": "Exceed Expectation of Speech Project",
+            "name": "TC4 — Privacy / minimal notes",
+            "scenario": "Very short notes; ensure no hallucinated details and respectful tone.",
+            "notes": "- Good energy\n- Improve clarity\n- Work on pacing\n- Closing felt abrupt",
         },
         {
-            "id": "T5",
-            "pathway": "Presentation Mastery",
-            "level": "Level 3",
-            "project": "Connect with Your Audience",
-            "level_focus": "Deliver content that is audience-focused and engaging.",
-            "purpose": "Build rapport and adapt to audience response.",
-            "speech_len": "5–7 minutes",
-            "speech_title": "Speak So They Lean In",
-            "rubric_snapshot": "Audience awareness strong; needs tighter structure.",
-            "notes_payload": (
-                "General Comments\n"
-                "- You excelled at: Reading reactions and adapting examples.\n"
-                "- You may want to work on: Clearer signposting (3 main points).\n"
-                "- To challenge yourself: Keep each point to one message + one example.\n\n"
-                "Rubric Summary\n"
-                "- Strengths (4–5): Audience Awareness 5, Eye Contact 4, Interest 4\n"
-                "- Improvements (1–3): Clarity 3\n"
-            ),
-            "total_score": 26,
-            "score_label": "Exceed Expectation of Speech Project",
+            "name": "TC5 — Mixed signals",
+            "scenario": "Contradictory inputs; check consistency and structure stability.",
+            "notes": "- Good eye contact at start, but later avoided audience\n- Gestures strong in storytelling, but distracting during explanation\n- Voice was clear but also sometimes too soft\n- Recommendation: set one focus area and practice with recording",
         },
     ]
 
 
-def _default_criteria_text() -> str:
-    """Use app rubric definitions if available; otherwise fall back to a short summary."""
-    # Try to build from SPEECH_EVALUATION_CRITERIA if defined in this app.py
-    crit = globals().get("SPEECH_EVALUATION_CRITERIA")
-    if isinstance(crit, dict) and crit:
-        parts = []
-        for name, levels in crit.items():
-            parts.append(f"{name}:")
-            if isinstance(levels, dict):
-                for k in sorted(levels.keys(), reverse=True):
-                    parts.append(f"  {k} - {levels[k]}")
-            parts.append("")
-        return "\n".join(parts).strip()
-    return (
-        "Evaluation criteria (summary): clarity, vocal variety, eye contact, gestures, "
-        "audience awareness, comfort level, interest, well supported."
-    )
+def run_canned_tests_for_evidence(base_pending: dict) -> list[dict]:
+    """Run 5 canned tests and return results for report evidence."""
+    if run_crewai_eval is None:
+        return [{"name": tc["name"], "status": "CrewAI import failed", "output": ""} for tc in _get_canned_tests()]
 
+    results: list[dict] = []
+    tests = _get_canned_tests()
 
-def _check_draft_structure(md: str) -> dict:
-    """Lightweight structural checks for reporting."""
-    checks = {
-        "has_strengths": bool(re.search(r"\bStrengths\b", md, re.I)),
-        "has_improvements": bool(re.search(r"\b(Area(s)? for Improvement|Improvements?)\b", md, re.I)),
-        "has_next_step": bool(re.search(r"\b(Next Step|Suggested Next)\b", md, re.I)),
-        "has_closing": bool(re.search(r"\b(Closing|Conclusion)\b", md, re.I)),
-    }
-    checks["score"] = sum(1 for v in checks.values() if v)
-    return checks
+    prog = st.progress(0, text="Running canned tests…")
+    for i, tc in enumerate(tests, start=1):
+        notes_payload = _build_test_notes_payload(base_pending, tc)
 
+        try:
+            out = run_crewai_eval(
+                notes=notes_payload,
+                pathway=base_pending.get("pathway", ""),
+                level=base_pending.get("level", ""),
+                project=base_pending.get("project", ""),
+                level_focus=base_pending.get("level_focus", ""),
+                purpose=base_pending.get("purpose", ""),
+                speech_len=base_pending.get("speech_len", ""),
+                criteria_text=base_pending.get("selected_criteria_text", ""),
+                total_score=base_pending.get("total_score", None),
+                score_label=base_pending.get("score_label", ""),
+                speech_title=base_pending.get("speech_title", ""),
+            )
+            results.append({"name": tc["name"], "status": "OK", "output": out, "notes": notes_payload})
+        except Exception as e:
+            results.append({"name": tc["name"], "status": f"ERROR: {type(e).__name__}", "output": "", "notes": notes_payload})
 
-def run_canned_tests(run_crewai_eval_func):
-    """Run 5 canned tests and return results (for evidence)."""
-    criteria_text = _default_criteria_text()
-    tests = _make_canned_tests()
-    results = []
-    for t in tests:
-        out = run_crewai_eval_func(
-            notes=t["notes_payload"],
-            pathway=t["pathway"],
-            level=t["level"],
-            project=t["project"],
-            level_focus=t["level_focus"],
-            purpose=t["purpose"],
-            speech_len=t["speech_len"],
-            criteria_text=criteria_text,
-            total_score=t["total_score"],
-            score_label=t["score_label"],
-            speech_title=t["speech_title"],
-        )
-        checks = _check_draft_structure(out or "")
-        results.append({**t, "criteria_text": criteria_text, "draft_md": out or "", "checks": checks})
+        prog.progress(i / len(tests), text=f"Running canned tests… {i}/{len(tests)}")
+
+    prog.empty()
     return results
 
 
-def build_test_evidence_md(results: list[dict]) -> str:
-    lines = [
-        "# T.E.A. – Canned Test Evidence (5 runs)",
-        "",
-        "Purpose: Provide repeatable evidence that the end-to-end pipeline produces structured drafts aligned to retrieved context.",
-        "",
-    ]
+def _tests_to_markdown(results: list[dict]) -> str:
+    lines = ["# T.E.A. Mini Test Evidence (5 canned tests)", ""]
     for r in results:
-        c = r.get("checks", {})
-        lines += [
-            f"## {r['id']} — {r['pathway']} / {r['level']} / {r['project']}",
-            f"- Speech Title: {r.get('speech_title','')}",
-            f"- Total Score: {r.get('total_score','')} ({r.get('score_label','')})",
-            f"- Rubric Snapshot: {r.get('rubric_snapshot','')}",
-            f"- Structure Checks: Strengths={c.get('has_strengths')} | Improvements={c.get('has_improvements')} | NextStep={c.get('has_next_step')} | Closing={c.get('has_closing')} (score {c.get('score',0)}/4)",
-            "",
-            "### Input (Notes Payload)",
-            "```",
-            (r.get("notes_payload") or "").strip(),
-            "```",
-            "",
-            "### Output (Draft Excerpt)",
-            "```",
-            (r.get("draft_md") or "")[:1200].strip(),
-            "```",
-            "",
-        ]
-    return "\n".join(lines).strip() + "\n"
+        lines.append(f"## {r.get('name','')}")
+        lines.append(f"**Status:** {r.get('status','')}")
+        lines.append("")
+        lines.append("### Input (notes payload)")
+        lines.append("```")
+        lines.append((r.get("notes") or "").strip())
+        lines.append("```")
+        lines.append("")
+        lines.append("### Output (draft)")
+        lines.append("```")
+        lines.append((r.get("output") or "").strip())
+        lines.append("```")
+        lines.append("")
+    return "\n".join(lines)
 
+
+def _tests_to_csv_bytes(results: list[dict]) -> bytes:
+    import csv
+    import io
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["test_name", "status", "output_chars"])
+    for r in results:
+        w.writerow([r.get("name",""), r.get("status",""), len((r.get("output") or ""))])
+    return buf.getvalue().encode("utf-8")
 
 
 def render_header():
@@ -1014,70 +930,62 @@ if st.session_state.page == "draft":
 
 
     st.caption(
-    
-        with st.expander("Test Mode (Generate evidence for final report)", expanded=False):
-        st.caption("Runs 5 canned test cases through the same CrewAI pipeline to produce repeatable evidence. (May consume API credits.)")
-        if run_crewai_eval is None:
-            st.error("CrewAI module is not available. Fix import / requirements before running tests.")
-        else:
-            if st.button("Run 5 canned tests", use_container_width=True):
-                st.session_state.test_results = None
-                with st.spinner("Running canned tests (this may take a while)..."):
-                    prog = st.progress(0)
-                    results = []
-                    tests = _make_canned_tests()
-                    for i, t in enumerate(tests, start=1):
-                        # Run one test at a time for progress visibility
-                        one = run_crewai_eval(
-                            notes=t["notes_payload"],
-                            pathway=t["pathway"],
-                            level=t["level"],
-                            project=t["project"],
-                            level_focus=t["level_focus"],
-                            purpose=t["purpose"],
-                            speech_len=t["speech_len"],
-                            criteria_text=_default_criteria_text(),
-                            total_score=t["total_score"],
-                            score_label=t["score_label"],
-                            speech_title=t["speech_title"],
-                        )
-                        t_out = {**t, "draft_md": one or "", "checks": _check_draft_structure(one or "")}
-                        results.append(t_out)
-                        prog.progress(i / len(tests))
-                    st.session_state.test_results = results
-
-            results = st.session_state.get("test_results")
-            if results:
-                st.success(f"Completed {len(results)} canned tests.")
-                # Summary table (lightweight)
-                for r in results:
-                    c = r.get("checks", {})
-                    st.markdown(
-                        f"**{r['id']}** — {r['pathway']} / {r['level']} / {r['project']}  \\"
-                        f"Score: {r.get('total_score')} ({r.get('score_label')}) | "
-                        f"Structure checks: {c.get('score',0)}/4"
-                    )
-                evidence_md = build_test_evidence_md(results)
-                st.download_button(
-                    "⬇️ Download Test Evidence (Markdown)",
-                    data=evidence_md.encode("utf-8"),
-                    file_name="tea_canned_test_evidence.md",
-                    mime="text/markdown",
-                    use_container_width=True,
-                )
-                evidence_pdf = make_pdf_bytes("T.E.A. Canned Test Evidence", evidence_md)
-                if evidence_pdf:
-                    st.download_button(
-                        "⬇️ Download Test Evidence (PDF)",
-                        data=evidence_pdf,
-                        file_name="tea_canned_test_evidence.pdf",
-                        mime="application/pdf",
-                        use_container_width=True,
-                    )
-
         "PDF tip: you can download PDF directly, or open the downloaded HTML in Chrome/Edge, then use Print → Save as PDF. "
         "(This keeps formatting cleaner than copying from the app.)"
     )
+
+
+    # ---------------- Mini Test Mode (Evidence for Final Report) ----------------
+    with st.expander("Mini Test Mode (Run 5 canned tests for evidence)", expanded=False):
+        st.write(
+            "Runs 5 short, predefined test cases using the current selected project context. "
+            "This helps you capture evidence (inputs + outputs) for your final report."
+        )
+        if st.button("Run 5 canned tests", use_container_width=True):
+            base_pending = st.session_state.get("pending_generation") or {}
+            # If the user navigated here directly, fall back to current session values where possible.
+            base_pending = {
+                **{
+                    "pathway": st.session_state.get("pathway", ""),
+                    "level": st.session_state.get("level", ""),
+                    "project": st.session_state.get("project", ""),
+                    "level_focus": st.session_state.get("level_focus", ""),
+                    "purpose": st.session_state.get("purpose", ""),
+                    "speech_len": st.session_state.get("speech_len", ""),
+                    "speech_title": st.session_state.get("speech_title", ""),
+                    "selected_criteria_text": st.session_state.get("selected_criteria_text", ""),
+                    "total_score": st.session_state.get("total_score", None),
+                    "score_label": st.session_state.get("score_label", ""),
+                },
+                **base_pending,
+            }
+            with st.spinner("Running canned tests (this may take a moment)…"):
+                st.session_state.test_results = run_canned_tests_for_evidence(base_pending)
+
+        results = st.session_state.get("test_results")
+        if results:
+            st.success(f"Completed {len(results)} tests.")
+            for r in results:
+                st.markdown(f"**{r['name']}** — {r['status']}")
+                if r.get("output"):
+                    st.text_area("Output (preview)", r["output"], height=180, key=f"out_{r['name']}")
+                st.markdown("---")
+
+            md = _tests_to_markdown(results)
+            st.download_button(
+                "⬇️ Download Test Evidence (Markdown)",
+                data=md.encode("utf-8"),
+                file_name="tea_canned_tests_evidence.md",
+                mime="text/markdown",
+                use_container_width=True,
+            )
+            st.download_button(
+                "⬇️ Download Test Summary (CSV)",
+                data=_tests_to_csv_bytes(results),
+                file_name="tea_canned_tests_summary.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
 
     st.markdown("---")
     back1, back2 = st.columns(2)
@@ -1463,3 +1371,5 @@ if st.session_state.page == "draft":
                     del st.session_state[k]
             st.session_state.page = "select"
             st.rerun()
+
+
