@@ -2,7 +2,8 @@ import time
 import re
 from pathlib import Path
 import html
-from io import BytesIO
+import datetime
+from io import BytesIO, StringIO
 
 import streamlit as st
 
@@ -525,17 +526,6 @@ def _build_test_notes_payload(base_pending: dict, test_case: dict) -> str:
     """Create a compact notes payload for canned tests (for evidence collection)."""
     # Keep this intentionally short and consistent for screenshots / report evidence.
     parts = []
-
-    # Include score summary inside the notes payload (so CrewAI can reference it)
-    # without requiring extra function parameters.
-    score = base_pending.get("total_score", None)
-    label = base_pending.get("score_label", "")
-    if score is not None or label:
-        score_line = f"Overall rubric score: {score}/40" if score is not None else "Overall rubric score: (not provided)"
-        if label:
-            score_line += f" ({label})"
-        parts.append(score_line)
-        parts.append("")
     parts.append("## Test Case")
     parts.append(f"- Name: {test_case.get('name','')}")
     parts.append(f"- Scenario: {test_case.get('scenario','')}")
@@ -604,11 +594,13 @@ def run_canned_tests_for_evidence(base_pending: dict) -> list[dict]:
                 purpose=base_pending.get("purpose", ""),
                 speech_len=base_pending.get("speech_len", ""),
                 criteria_text=base_pending.get("selected_criteria_text", ""),
+                total_score=base_pending.get("total_score", None),
+                score_label=base_pending.get("score_label", ""),
                 speech_title=base_pending.get("speech_title", ""),
             )
             results.append({"name": tc["name"], "status": "OK", "output": out, "notes": notes_payload})
         except Exception as e:
-            results.append({"name": tc["name"], "status": f"ERROR: {type(e).__name__}: {e}", "output": "", "notes": notes_payload})
+            results.append({"name": tc["name"], "status": f"ERROR: {type(e).__name__}", "output": "", "notes": notes_payload})
 
         prog.progress(i / len(tests), text=f"Running canned tests… {i}/{len(tests)}")
 
@@ -829,19 +821,8 @@ if st.session_state.page == "draft_loading":
         output = "CrewAI module failed to import.\n\n" + (CREWAI_IMPORT_ERROR or "")
     else:
         with st.spinner("Running CrewAI…"):
-            # Embed score summary into notes so CrewAI can reference it without
-            # requiring extra function parameters.
-            notes_payload = pending.get("notes_payload", "")
-            total_score = pending.get("total_score")
-            score_label = pending.get("score_label", "")
-            if total_score is not None or score_label:
-                score_line = f"Overall rubric score: {total_score}/40" if total_score is not None else "Overall rubric score: (not provided)"
-                if score_label:
-                    score_line += f" ({score_label})"
-                notes_payload = score_line + "\n\n" + notes_payload
-
             output = run_crewai_eval(
-                notes=notes_payload,
+                notes=pending.get("notes_payload", ""),
                 pathway=pending.get("pathway", ""),
                 level=pending.get("level", ""),
                 project=pending.get("project", ""),
@@ -849,6 +830,8 @@ if st.session_state.page == "draft_loading":
                 purpose=pending.get("purpose", ""),
                 speech_len=pending.get("speech_len", ""),
                 criteria_text=pending.get("criteria_text", ""),
+                total_score=pending.get("total_score"),
+                score_label=pending.get("score_label", ""),
             )
 
     st.session_state.crewai_output = output
@@ -953,58 +936,135 @@ if st.session_state.page == "draft":
     )
 
 
-    # ---------------- Mini Test Mode (Evidence for Final Report) ----------------
-    with st.expander("🧪 Mini Test Mode (Run 5 canned tests for evidence)", expanded=False):
-        st.write(
-            "Runs 5 short, predefined test cases using the current selected project context. "
-            "This helps you capture evidence (inputs + outputs) for your final report."
+        # ---------------- Evidence (based on current generated output) ----------------
+    with st.expander("🧾 Evidence & Alignment Check (use in final report)", expanded=False):
+        st.caption(
+            "Uses the *current* generated draft + your selected project context to produce lightweight evidence "
+            "that the draft is grounded and follows the Toastmasters evaluation structure. (No extra test cases.)"
         )
-        if st.button("Run 5 canned tests", use_container_width=True):
-            base_pending = st.session_state.get("pending_generation") or {}
-            # If the user navigated here directly, fall back to current session values where possible.
-            base_pending = {
-                **{
-                    "pathway": st.session_state.get("pathway", ""),
-                    "level": st.session_state.get("level", ""),
-                    "project": st.session_state.get("project", ""),
-                    "level_focus": st.session_state.get("level_focus", ""),
-                    "purpose": st.session_state.get("purpose", ""),
-                    "speech_len": st.session_state.get("speech_len", ""),
-                    "speech_title": st.session_state.get("speech_title", ""),
-                    "selected_criteria_text": st.session_state.get("selected_criteria_text", ""),
-                    "total_score": st.session_state.get("total_score", None),
-                    "score_label": st.session_state.get("score_label", ""),
-                },
-                **base_pending,
-            }
-            with st.spinner("Running canned tests (this may take a moment)…"):
-                st.session_state.test_results = run_canned_tests_for_evidence(base_pending)
 
-        results = st.session_state.get("test_results")
-        if results:
-            st.success(f"Completed {len(results)} tests.")
-            for r in results:
-                st.markdown(f"**{r['name']}** — {r['status']}")
-                if r.get("output"):
-                    st.text_area("Output (preview)", r["output"], height=180, key=f"out_{r['name']}")
-                st.markdown("---")
+        draft_md = st.session_state.get("draft_md", "") or ""
+        details = st.session_state.get("details", {}) or {}
 
-            md = _tests_to_markdown(results)
+        speech_title = (details.get("speech_title") or "").strip()
+        purpose = (details.get("purpose") or "").strip()
+        level_focus = (details.get("level_focus") or "").strip()
+        criteria_text = st.session_state.get("selected_criteria_text", "") or ""
+
+        # General comments (human-written)
+        gc = st.session_state.get("general_comments", {}) or {}
+        gc_strength = (gc.get("strengths") or "").strip()
+        gc_improve = (gc.get("improvements") or "").strip()
+        gc_challenge = (gc.get("challenge") or "").strip()
+
+        if not draft_md.strip():
+            st.warning("No draft found yet. Generate a draft first to produce evidence.")
+        else:
+            # --- Simple, transparent checks (heuristics) ---
+            def _has_any(text: str, keywords: list[str]) -> bool:
+                t = (text or "").lower()
+                return any(k.lower() in t for k in keywords if k)
+
+            def _purpose_keywords(p: str) -> list[str]:
+                words = re.findall(r"[A-Za-z]{4,}", p or "")
+                seen = set()
+                out = []
+                for w in words:
+                    wl = w.lower()
+                    if wl not in seen:
+                        seen.add(wl)
+                        out.append(w)
+                return out[:12]
+
+            checks = []
+            checks.append(("Has clear headings", _has_any(draft_md, ["## Overview", "## Strengths", "## Areas to Improve", "## Closing"])))
+            checks.append(("Includes both strengths & improvements", _has_any(draft_md, ["Strengths"]) and _has_any(draft_md, ["Improve", "Areas to Improve"])))
+
+            if purpose:
+                kws = _purpose_keywords(purpose)
+                checks.append(("Mentions project purpose keywords", any(k.lower() in draft_md.lower() for k in kws)))
+            else:
+                checks.append(("Mentions project purpose keywords", True))
+
+            checks.append(("References evaluation criteria (grounding)",
+                          _has_any(draft_md, ["Clarity", "Vocal", "Eye Contact", "Gestures", "Audience", "Comfort", "Interest", "Well Supported"])
+                          or bool(criteria_text.strip())))
+            checks.append(("Signals human review/editing", _has_any(draft_md, ["review", "edit", "refine", "suggest"])))
+
+            passed = sum(1 for _, ok in checks if ok)
+            total = len(checks)
+            st.write(f"**Evidence checks passed:** {passed}/{total}")
+
+            st.table([{"Check": name, "Pass": "Yes" if ok else "No"} for name, ok in checks])
+
+            # --- Evidence summary (report-ready) ---
+            now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+            evidence_lines = [
+                "# T.E.A. Draft Evidence (Auto-generated)",
+                "",
+                f"- Date generated: {now_str}",
+            ]
+            if speech_title:
+                evidence_lines.append(f"- Speech title: {speech_title}")
+            if details.get("pathway"):
+                evidence_lines.append(f"- Pathway: {details.get('pathway')}")
+            if details.get("level"):
+                evidence_lines.append(f"- Level: {details.get('level')}")
+            if details.get("project"):
+                evidence_lines.append(f"- Project: {details.get('project')}")
+            if level_focus:
+                evidence_lines.append(f"- Level focus: {level_focus}")
+            if purpose:
+                evidence_lines.append(f"- Project purpose: {purpose}")
+
+            total_score = st.session_state.get("total_score")
+            score_label = st.session_state.get("score_label")
+            if total_score is not None:
+                evidence_lines.append(f"- Total score: {total_score}")
+            if score_label:
+                evidence_lines.append(f"- Performance band: {score_label}")
+
+            evidence_lines += [
+                "",
+                "## Human evaluator comments (inputs)",
+                f"- You excelled at: {gc_strength or '(not provided)'}",
+                f"- Work on: {gc_improve or '(not provided)'}",
+                f"- Challenge: {gc_challenge or '(not provided)'}",
+                "",
+                "## Checklist evidence",
+            ]
+            for name, ok in checks:
+                evidence_lines.append(f"- {name}: {'PASS' if ok else 'NEEDS WORK'}")
+
+            evidence_lines += [
+                "",
+                "## Draft excerpt (first 25 lines)",
+                "```",
+                "\n".join(draft_md.strip().splitlines()[:25]),
+                "```",
+            ]
+
+            evidence_md = "\n".join(evidence_lines)
+
             st.download_button(
-                "⬇️ Download Test Evidence (Markdown)",
-                data=md.encode("utf-8"),
-                file_name="tea_canned_tests_evidence.md",
+                "Download Evidence (Markdown)",
+                data=evidence_md.encode("utf-8"),
+                file_name="tea_draft_evidence.md",
                 mime="text/markdown",
-                use_container_width=True,
-            )
-            st.download_button(
-                "⬇️ Download Test Summary (CSV)",
-                data=_tests_to_csv_bytes(results),
-                file_name="tea_canned_tests_summary.csv",
-                mime="text/csv",
-                use_container_width=True,
             )
 
+            # CSV download
+            csv_buf = StringIO()
+            csv_buf.write("Check,Pass\n")
+            for name, ok in checks:
+                csv_buf.write(f'"{name}","{"Yes" if ok else "No"}"\n')
+
+            st.download_button(
+                "Download Evidence Summary (CSV)",
+                data=csv_buf.getvalue().encode("utf-8"),
+                file_name="tea_draft_evidence.csv",
+                mime="text/csv",
+            )
     st.markdown("---")
     back1, back2 = st.columns(2)
     with back1:
