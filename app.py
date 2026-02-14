@@ -1014,7 +1014,8 @@ if st.session_state.page == "draft":
 
 
     st.caption(
-    with st.expander("Test Mode (Generate evidence for final report)", expanded=False):
+    
+        with st.expander("Test Mode (Generate evidence for final report)", expanded=False):
         st.caption("Runs 5 canned test cases through the same CrewAI pipeline to produce repeatable evidence. (May consume API credits.)")
         if run_crewai_eval is None:
             st.error("CrewAI module is not available. Fix import / requirements before running tests.")
