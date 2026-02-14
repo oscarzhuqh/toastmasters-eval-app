@@ -131,3 +131,79 @@ Requirements
             return (resp.choices[0].message.content or "").strip() or "(No output returned.)"
         except Exception as e:
             return f"Failed to generate draft. Error: {type(e).__name__}: {e}"
+
+
+# ---------------- Purpose Alignment Summary (Lightweight Evidence Helper) ----------------
+def purpose_alignment_summary(
+    purpose: str,
+    evaluator_notes: str,
+    draft_md: str,
+    speech_title: str = "",
+    model: str | None = None,
+) -> str:
+    """Return a short, report-friendly summary indicating whether the speech met the selected project purpose.
+    Uses the configured LLM (same env/secrets as generation). If LLM is unavailable, returns a heuristic message.
+    """
+
+    purpose = (purpose or "").strip()
+    evaluator_notes = (evaluator_notes or "").strip()
+    draft_md = (draft_md or "").strip()
+
+    if not purpose:
+        return "**Purpose alignment:** Unable to assess (missing project purpose)."
+
+    if not evaluator_notes and not draft_md:
+        return (
+            "**Purpose alignment (quick check):** Unable to assess confidently because evaluator notes/draft are empty.\n\n"
+            f"**Target purpose:** {purpose}"
+        )
+
+    model_name = model or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+    api_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_APIKEY")
+    if not api_key:
+        return (
+            "**Purpose alignment (quick check):** LLM is not configured (missing API key), so no automated check was run.\n\n"
+            f"**Target purpose:** {purpose}\n"
+            "**Tip:** Add a few bullets in Evaluator Notes describing what the speaker did relative to the purpose."
+        )
+
+    try:
+        from openai import OpenAI  # type: ignore
+        client = OpenAI(api_key=api_key)
+
+        title_line = f"Speech title: {speech_title}\n" if speech_title else ""
+
+        prompt = (
+            "You are checking whether a Toastmasters speech met its project purpose.\n"
+            "Return a SHORT report-friendly result with:\n"
+            "1) Verdict: Met / Partially Met / Not Met (one of these only)\n"
+            "2) 2 evidence bullets grounded ONLY in evaluator notes (prefer notes) or the draft text if notes are insufficient\n"
+            "3) 1 improvement bullet that ties back to the purpose\n\n"
+            "Target purpose:\n" + purpose + "\n\n" +
+            title_line +
+            "Evaluator notes:\n" + evaluator_notes + "\n\n" +
+            "Draft (for reference):\n" + draft_md
+        )
+
+        resp = client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": "Be strict about grounding. Do not invent facts."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.2,
+        )
+
+        content = (resp.choices[0].message.content or "").strip()
+        if not content:
+            raise ValueError("Empty response")
+
+        return "**Purpose alignment (quick check)**\n\n" + content
+
+    except Exception as e:
+        return (
+            "**Purpose alignment (quick check):** Automated check failed.\n\n"
+            f"Error: `{type(e).__name__}: {e}`\n\n"
+            f"**Target purpose:** {purpose}"
+        )
