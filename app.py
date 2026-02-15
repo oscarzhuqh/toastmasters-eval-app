@@ -1170,9 +1170,17 @@ if st.session_state.page == "draft":
 
     st.markdown("---")
     st.subheader("Export")
+st.caption("Please confirm before exporting the final report.")
+export_confirmed = st.checkbox(
+    "I have reviewed and confirm the alignment indicators for export.",
+    value=False,
+)
+st.session_state["export_confirmed"] = export_confirmed
+
     c1, c2, c3 = st.columns(3)
     with c1:
         st.download_button(
+    disabled=not st.session_state.get("export_confirmed", False),
             "⬇️ Download Markdown",
             data=edited.encode("utf-8"),
             file_name=md_name,
