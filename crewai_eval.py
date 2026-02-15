@@ -14,6 +14,7 @@ Optional helper (used by reports / screenshots):
 from __future__ import annotations
 
 import os
+import re
 from typing import Optional, Dict, Tuple
 
 
@@ -183,10 +184,16 @@ Write the output as a structured evaluation draft in plain English.
 
 Required structure (use Markdown headings exactly):
 ## Opening
-(1–2 sentences that reference the project purpose)
+Write 2–3 sentences (~40–70 words). The opening should:
+- Thank the speaker and mention the speech title
+- Clearly link back to the project purpose
+- Use a warm, encouraging Toastmasters tone
 
 ## Strengths
-- Bullet points that map back to rubric strengths and notes
+Write 3–5 bullet points. Each bullet should be ~20–30 words and should:
+- State one clear strength
+- Include a brief explanation or example from the notes
+- Link back to evaluation criteria where possible
 
 ## Recommendations
 - Bullet points that map back to rubric improvement areas and notes
@@ -203,6 +210,12 @@ Required structure (use Markdown headings exactly):
   - [ ] Balanced commendations + improvements
   - [ ] Actionable next step provided
 - 2–3 short bullets explaining why items are checked/unchecked.
+
+Length guidance:
+- Opening: 2–3 sentences (~40–70 words)
+- Strengths: 3–5 bullets (~20–30 words each)
+- Recommendations: 3–5 bullets (~18–28 words each)
+- One Challenge: 1–2 sentences (~25–45 words)
 
 Rules:
 - Be specific (use examples where available), but do not invent details.
