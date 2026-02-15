@@ -1246,7 +1246,6 @@ if st.session_state.page == "draft":
                 data=b"",
                 file_name=pdf_name,
                 mime="application/pdf",
-                disabled=True,
                 use_container_width=True,
             )
             st.caption("PDF export needs ReportLab (reportlab>=4.0).")
@@ -1651,4 +1650,3 @@ if st.session_state.page == "draft":
                     del st.session_state[k]
             st.session_state.page = "select"
             st.rerun()
-
