@@ -210,7 +210,7 @@ Format exactly:
 
 (Write 2–3 claim/evidence pairs.)
 
-### Checklist (auto)
+### Evaluator Alignment Checklist (Guardrails Implementation)
 - [ ] Purpose clearly addressed
 - [ ] Level focus demonstrated
 - [ ] Feedback linked to evaluation criteria
