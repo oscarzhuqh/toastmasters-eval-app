@@ -191,7 +191,7 @@ Write 3–5 bullet points (~18–28 words each). Each bullet should:
 ## One Challenge
 Write 1–2 sentences (~25–45 words). Make it very actionable and phrased as the next step.
 
-## Purpose Alignment (Evidence-bound, anti-hallucination)
+## Purpose Alignment
 Write an evidence-based alignment summary. You may ONLY make alignment claims that are directly supported by:
 (a) the stated Project Purpose
 (b) the stated Level Focus

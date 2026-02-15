@@ -28,6 +28,12 @@ def _split_md_sections(md_text: str) -> dict:
         if m:
             commit()
             current = m.group(1).strip()
+            # Normalize common headings so the export/parser remains robust
+            if current.lower().startswith("purpose alignment"):
+                current = "Purpose Alignment"
+            elif current.lower().startswith("rubric snapshot"):
+                current = "Rubric Snapshot"
+
             continue
         buf.append(ln)
 
@@ -528,7 +534,7 @@ def _ensure_purpose_alignment_evidence(draft_md: str, purpose: str, level_focus:
     if not md:
         return md
 
-    m = re.search(r"(?mi)^\s*##\s+Purpose\s+Alignment\s*$", md)
+    m = re.search(r"(?mi)^\s*##\s+Purpose\s+Alignment\b.*$", md)
     if not m:
         return md
 
@@ -621,12 +627,22 @@ def build_export_html(
     def row(k, v):
         return f"<tr><th>{esc(k)}</th><td>{esc(v)}</td></tr>"
 
-    meeting_rows = "".join(
+    def get_first(d: dict, keys: list[str], default: str = "") -> str:
+        for k in keys:
+            v = d.get(k)
+            if v is None:
+                continue
+            s = str(v).strip()
+            if s:
+                return s
+        return default
+
+meeting_rows = "".join(
         [
-            row("Speaker", meeting.get("speaker_name") or meeting.get("speaker") or ""),
-            row("Evaluator", meeting.get("evaluator_name") or meeting.get("evaluator") or ""),
-            row("Date", meeting.get("meeting_date") or ""),
-            row("Speech Title", meeting.get("speech_title") or ""),
+            row("Speaker", get_first(meeting, ["speaker_name","speaker","speakerName","speaker_name_input","speaker_input"])),
+            row("Evaluator", get_first(meeting, ["evaluator_name","evaluator","evaluatorName","evaluator_name_input","evaluator_input"])),
+            row("Date", get_first(meeting, ["meeting_date","date","meetingDate","session_date"])),
+            row("Speech Title", get_first(meeting, ["speech_title","title","speechTitle"])),
         ]
     )
     selection_rows = "".join(
@@ -635,8 +651,8 @@ def build_export_html(
             row("Level", selection.get("level") or ""),
             row("Project", selection.get("project") or ""),
             row("Speech Length", selection.get("speech_len") or ""),
-            row("Project Purpose", selection.get("purpose") or ""),
-            row("Level Focus", selection.get("level_focus") or ""),
+            row("Project Purpose", get_first(selection, ["purpose","project_purpose","projectPurpose","purpose_text","project_purpose_text"])),
+            row("Level Focus", get_first(selection, ["level_focus","levelFocus","focus","level_focus_text","focus_text"])),
         ]
     )
 
