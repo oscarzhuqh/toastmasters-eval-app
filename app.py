@@ -75,7 +75,9 @@ def _extract_alignment_checks(md_text: str) -> tuple[str, dict[str, bool], list[
             break
         if ln.lower().startswith("evidence:"):
             continue
-        if ln.startswith("-") and not ln.lower().startswith("- alignment claim"):
+        if ln.lower().startswith("- alignment claim"):
+            continue
+        if ln.startswith("-"):
             continue
         collected.append(ln)
         if len(collected) >= 2:
@@ -671,7 +673,9 @@ def build_export_html(
     rubric_snapshot_html = box_text(rubric_snapshot)
     recs_html = box_text(recs)
     challenge_html = box_text(challenge)
-    evidence_html = box_text(align_evidence)
+    align_evidence = (align_evidence or "").replace("### Checklist (auto)", "### Alignment Checklist (Evidence-Based)
+Checked items are derived from the evidence listed above.")
+    evidence_html = f"<div class='evidence'>{esc(align_evidence)}</div>"
 
     def checkbox_line(label: str, checked: bool) -> str:
         box = "☑" if checked else "☐"
