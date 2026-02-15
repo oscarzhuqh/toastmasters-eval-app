@@ -6,8 +6,130 @@ from io import BytesIO
 
 import streamlit as st
 
+
+def _split_md_sections(md_text: str) -> dict:
+    """Split draft markdown into named sections based on '## Heading'."""
+    md = (md_text or "").strip()
+    if not md:
+        return {}
+
+    sections: dict[str, str] = {}
+    current = None
+    buf: list[str] = []
+
+    def commit():
+        nonlocal current, buf
+        if current is not None:
+            sections[current] = "\n".join(buf).strip()
+        buf = []
+
+    for ln in md.splitlines():
+        m = re.match(r"^\s*##\s+(.+?)\s*$", ln)
+        if m:
+            commit()
+            current = m.group(1).strip()
+            continue
+        buf.append(ln)
+
+    commit()
+    return sections
+
+
+def _extract_alignment_checks(md_text: str) -> tuple[str, dict[str, bool], list[str], str]:
+    """Extract Purpose Alignment summary + checklist + reasons + evidence block.
+
+    Anti-hallucination enforcement:
+    - If Evidence lines are missing, force all checklist items to False.
+    - If any Evidence line contains 'Insufficient evidence', force Purpose + Level Focus unchecked.
+    - If evidence has no rubric/criteria hint, uncheck 'Feedback linked to evaluation criteria'.
+    """
+    checks = {
+        "Purpose clearly addressed": False,
+        "Level focus demonstrated": False,
+        "Feedback linked to evaluation criteria": False,
+        "Balanced commendations + improvements": False,
+        "Actionable next step provided": False,
+    }
+    reasons: list[str] = []
+    summary = ""
+    evidence_block = ""
+
+    sections = _split_md_sections(md_text)
+    block = sections.get("Purpose Alignment", "") or sections.get("Purpose alignment", "")
+    block = (block or "").strip()
+    if not block:
+        return summary, checks, reasons, evidence_block
+
+    lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
+
+    # Summary: first 1–2 non-checklist, non-evidence lines
+    collected = []
+    for ln in lines:
+        if re.match(r"^-\s*\[(x| )\]\s+", ln, flags=re.IGNORECASE):
+            break
+        if ln.lower().startswith("evidence:"):
+            continue
+        if ln.startswith("-") and not ln.lower().startswith("- alignment claim"):
+            continue
+        collected.append(ln)
+        if len(collected) >= 2:
+            break
+    summary = " ".join(collected).strip()
+
+    # Checklist (if present)
+    for ln in lines:
+        mm = re.match(r"^-\s*\[(x| )\]\s*(.+?)\s*$", ln, flags=re.IGNORECASE)
+        if not mm:
+            continue
+        checked = mm.group(1).lower() == "x"
+        label = mm.group(2).strip().lower()
+        for k in list(checks.keys()):
+            kk = k.lower()
+            if kk in label or label in kk:
+                checks[k] = checked
+
+    # Reasons: bullets (best effort)
+    for ln in lines:
+        if re.match(r"^-\s*\[(x| )\]\s+", ln, flags=re.IGNORECASE):
+            continue
+        if ln.startswith("-") and not ln.lower().startswith("- alignment claim"):
+            reasons.append(ln.lstrip("-").strip())
+    reasons = [r for r in reasons if r and len(r) <= 180][:3]
+
+    # Evidence lines
+    evidence_lines = [ln for ln in lines if ln.lower().startswith("evidence:")]
+    if not evidence_lines:
+        for k in checks:
+            checks[k] = False
+        evidence_block = "Insufficient evidence: no Evidence lines were provided in the draft."
+        return summary, checks, reasons, evidence_block
+
+    insufficient = any("insufficient evidence" in ln.lower() for ln in evidence_lines)
+    if insufficient:
+        checks["Purpose clearly addressed"] = False
+        checks["Level focus demonstrated"] = False
+
+    has_rubric_hint = any(("rubric" in ln.lower() or "/5" in ln or "criteria" in ln.lower()) for ln in evidence_lines)
+    if not has_rubric_hint:
+        checks["Feedback linked to evaluation criteria"] = False
+
+    # Compact evidence block for the form (include claim+evidence lines, exclude checklist)
+    ev_lines = []
+    for ln in lines:
+        if re.match(r"^-\s*\[(x| )\]\s+", ln, flags=re.IGNORECASE):
+            continue
+        # Keep only alignment claim/evidence/why bullets/headings
+        if ln.lower().startswith("- alignment claim") or ln.lower().startswith("evidence:") or ln.lower().startswith("### "):
+            ev_lines.append(ln)
+        elif ln.startswith("-") and len(ev_lines) > 0:
+            # Likely "Why" bullets
+            ev_lines.append(ln)
+
+    evidence_block = "\n".join(ev_lines).strip()
+    return summary, checks, reasons, evidence_block
+
+
 # --- Optional PDF export (ReportLab) ---
-# NOTE: For best formatting, use the HTML export and Print → Save as PDF.
 try:
     from reportlab.lib.pagesizes import A4
     from reportlab.pdfgen import canvas
@@ -23,17 +145,20 @@ except Exception as _e:
 
 
 # --- CrewAI import (safe) ---
-# Prefer updated module name; fall back to original.
-CREWAI_IMPORT_ERROR = ""
+# Keep generation robust even if optional helper functions are missing.
 try:
-    from crewai_eval_updated import run_crewai_eval, purpose_alignment_summary  # type: ignore
+    from crewai_eval import run_crewai_eval
+except Exception as e:
+    run_crewai_eval = None
+    CREWAI_IMPORT_ERROR = str(e)
+else:
+    CREWAI_IMPORT_ERROR = ""
+
+# Optional helper (won't break core generation if absent)
+try:
+    from crewai_eval import purpose_alignment_summary
 except Exception:
-    try:
-        from crewai_eval import run_crewai_eval, purpose_alignment_summary  # type: ignore
-    except Exception as e:
-        run_crewai_eval = None
-        purpose_alignment_summary = None
-        CREWAI_IMPORT_ERROR = str(e)
+    purpose_alignment_summary = None
 
 
 # ==================== CONFIG ====================
@@ -117,7 +242,7 @@ SPEECH_EVALUATION_CRITERIA = {
     },
 }
 
-# Rubric rows (Ice Breaker)
+# Rubric rows (as per your sheet)
 RUBRIC_DEF = [
     ("Clarity", "Spoken language is clear and is easily understood"),
     ("Vocal Variety", "Uses tone, speed, and volume as tools"),
@@ -130,17 +255,25 @@ RUBRIC_DEF = [
 ]
 
 
-# ==================== SESSION STATE ====================
+# ==================== SESSION STATE (router) ====================
 if "page" not in st.session_state:
-    st.session_state.page = "select"  # select -> loading -> evaluation -> draft_loading -> draft
+    # select -> loading -> evaluation -> draft_loading -> draft
+    st.session_state.page = "select"
 
 if "details" not in st.session_state:
     st.session_state.details = None
 
+if "crewai_output" not in st.session_state:
+    st.session_state.crewai_output = None
+
 if "draft_md" not in st.session_state:
     st.session_state.draft_md = ""
 
+if "draft_html" not in st.session_state:
+    st.session_state.draft_html = ""
+
 if "pending_generation" not in st.session_state:
+    # Stores payload to generate draft on the next page.
     st.session_state.pending_generation = None
 
 if "meeting" not in st.session_state:
@@ -149,7 +282,7 @@ if "meeting" not in st.session_state:
 
 # ==================== UI SETUP ====================
 st.set_page_config(
-    page_title="Toastmasters Evaluation Assistant (T.E.A.)",
+    page_title="Toastmasters Evaluation Assistant T.E.A.",
     page_icon="☕",
     layout="centered",
 )
@@ -159,9 +292,8 @@ st.markdown(
     <style>
       textarea { background-color: #EAF0FF !important; }
       div[data-testid="stVerticalBlock"] > div { gap: 0.55rem; }
-      .tea-narrow { max-width: 720px; margin: 0 auto; }
-      /* Make radios tighter like a paper form */
-      div[role="radiogroup"] label { padding-right: 0.25rem; }
+      /* Make the central project-details box feel less wide */
+      .tea-narrow { max-width: 680px; margin: 0 auto; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -181,10 +313,12 @@ def resolve_md_path(pathway_label: str) -> Path:
     if expected.exists():
         return expected
 
+    # If user renamed to Title.md (e.g., "Engaging Humor.md")
     alt_title = KB_DIR / f"{pathway_label}.md"
     if alt_title.exists():
         return alt_title
 
+    # snake_case fallback
     alt_snake = KB_DIR / (pathway_label.lower().replace(" ", "_") + ".md")
     if alt_snake.exists():
         return alt_snake
@@ -280,7 +414,7 @@ def render_full_ice_breaker_criteria():
 
 def render_rubric_table(rubric_def):
     """
-    Form-like row layout:
+    Official-sheet-like row layout:
       [Criteria] | [5 4 3 2 1] | [Comment box]
     Default rating = 3.
     """
@@ -309,7 +443,7 @@ def render_rubric_table(rubric_def):
                 rating = st.radio(
                     label=f"{name} rating",
                     options=[5, 4, 3, 2, 1],
-                    index=2,
+                    index=2,  # ✅ default = 3
                     horizontal=True,
                     label_visibility="collapsed",
                     key=f"rubric_rating_{name}",
@@ -356,14 +490,14 @@ def compute_total_score(rubric_items):
     return sum(int(x.get("rating", 0)) for x in rubric_items)
 
 
-def overall_band(total_score: int):
-    # For 8 criteria (max 40). If you add/remove criteria later, adjust thresholds.
+def overall_band(total_score):
+    # For 8 criteria (max 40). If you add/remove criteria later, you can adjust these thresholds.
     if total_score >= 36:
         return "Outstanding (Exceptional/Superior)", "success"
     if total_score >= 28:
         return "Proficient (Expertise/Mastery)", "info"
     if total_score >= 20:
-        return "Competent (Meets Standard)", "warning"
+        return " Competent (Meets Standard)", "warning"
     return "Needs Improvement (Below Standard)", "error"
 
 
@@ -382,172 +516,39 @@ def build_selected_criteria_text(project: str, rubric_items):
     return "\n".join(lines)
 
 
-def _split_md_sections(md_text: str) -> dict:
-    """Split draft markdown into named sections based on required headings."""
-    md = (md_text or "").strip()
-    if not md:
-        return {}
-
-    # Normalize headings (## Heading)
-    sections = {}
-    current = None
-    buf = []
-
-    def commit():
-        nonlocal current, buf
-        if current is not None:
-            sections[current] = "\n".join(buf).strip()
-        buf = []
-
-    for ln in md.splitlines():
-        m = re.match(r"^\s*##\s+(.+?)\s*$", ln)
-        if m:
-            commit()
-            current = m.group(1).strip()
-            continue
-        buf.append(ln)
-
-    commit()
-    return sections
-
-
-def _extract_alignment_checks(md_text: str) -> tuple[str, dict[str, bool], list[str]]:
-    """Extract Purpose Alignment summary + checklist + reason bullets.
-
-    Anti-hallucination logic:
-    - If Evidence lines are missing, force all checklist items to False.
-    - If Evidence lines contain "Insufficient evidence...", force the related checklist items to False
-      even if the model checked them.
-    """
-    checks = {
-        "Purpose clearly addressed": False,
-        "Level focus demonstrated": False,
-        "Feedback linked to evaluation criteria": False,
-        "Balanced commendations + improvements": False,
-        "Actionable next step provided": False,
-    }
-    reasons: list[str] = []
-    summary = ""
-
-    sections = _split_md_sections(md_text)
-    block = sections.get("Purpose Alignment") or sections.get("Purpose alignment") or ""
-    if not block:
-        return summary, checks, reasons
-
-    lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
-
-    # Summary: first 1–2 non-checklist lines
-    collected = []
-    for ln in lines:
-        if re.match(r"^\-\s*\[(x| )\]\s+", ln, flags=re.IGNORECASE):
-            break
-        if ln.lower().startswith("evidence:"):
-            continue
-        if ln.startswith("-") and not ln.lower().startswith("- alignment claim"):
-            continue
-        collected.append(ln)
-        if len(collected) >= 2:
-            break
-    summary = " ".join(collected).strip()
-
-    # Parse checklist (if present)
-    for ln in lines:
-        mm = re.match(r"^\-\s*\[(x| )\]\s*(.+?)\s*$", ln, flags=re.IGNORECASE)
-        if not mm:
-            continue
-        checked = mm.group(1).lower() == "x"
-        label = mm.group(2).strip().lower()
-        for k in list(checks.keys()):
-            kk = k.lower()
-            if kk in label or label in kk:
-                checks[k] = checked
-
-    # Reasons: bullets (best effort)
-    for ln in lines:
-        if re.match(r"^\-\s*\[(x| )\]\s+", ln, flags=re.IGNORECASE):
-            continue
-        if ln.startswith("-") and not ln.lower().startswith("- alignment claim"):
-            reasons.append(ln.lstrip("-").strip())
-    reasons = [r for r in reasons if r and len(r) <= 180][:3]
-
-    # --- Evidence binding enforcement ---
-    evidence_lines = [ln for ln in lines if ln.lower().startswith("evidence:")]
-    if not evidence_lines:
-        for k in checks:
-            checks[k] = False
-        return summary, checks, reasons
-
-    insufficient = any("insufficient evidence" in ln.lower() for ln in evidence_lines)
-    if insufficient:
-        checks["Purpose clearly addressed"] = False
-        checks["Level focus demonstrated"] = False
-
-    has_rubric_hint = any(("rubric" in ln.lower() or "/5" in ln or "criteria" in ln.lower()) for ln in evidence_lines)
-    if not has_rubric_hint:
-        checks["Feedback linked to evaluation criteria"] = False
-
-    return summary, checks, reasons
-
-
-    lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
-    # Summary: first 1–2 non-checklist lines
-    collected = []
-    for ln in lines:
-        if re.match(r"^-\s*\[(x| )\]\s+", ln, flags=re.IGNORECASE):
-            break
-        if ln.startswith("-"):
-            continue
-        collected.append(ln)
-        if len(collected) >= 2:
-            break
-    summary = " ".join(collected).strip()
-
-    # Checklist
-    for ln in lines:
-        mm = re.match(r"^-\s*\[(x| )\]\s*(.+?)\s*$", ln, flags=re.IGNORECASE)
-        if not mm:
-            continue
-        checked = mm.group(1).lower() == "x"
-        label = mm.group(2).strip().lower()
-        for k in list(checks.keys()):
-            kk = k.lower()
-            if kk in label or label in kk:
-                checks[k] = checked
-
-    # Reasons: bullets after checklist lines (best effort)
-    for ln in lines:
-        if re.match(r"^-\s*\[(x| )\]\s+", ln, flags=re.IGNORECASE):
-            continue
-        if ln.startswith("-") and not re.match(r"^-\s*\[(x| )\]\s+", ln, flags=re.IGNORECASE):
-            reasons.append(ln.lstrip("-").strip())
-
-    reasons = [r for r in reasons if r and len(r) <= 180][:3]
-    return summary, checks, reasons
-
-
-def build_export_html_form(
+def build_export_html(
     title: str,
     meeting: dict,
     selection: dict,
     draft_md: str,
+    include_appendix: bool = True,
 ) -> str:
-    """Create a print-to-PDF-friendly HTML styled like the official Toastmasters evaluation form."""
-    # Markdown -> HTML
+    """Create a meeting-ready, print-to-PDF-friendly HTML file (Toastmasters-form style)."""
+
+    # Markdown -> HTML (appendix)
     try:
         import markdown as md  # type: ignore
-
-        md_html = md.markdown(draft_md or "", extensions=["fenced_code"])
+        draft_html = md.markdown(draft_md or "", extensions=["fenced_code", "tables"])
     except Exception:
-        md_html = f"<pre style='white-space:pre-wrap'>{html.escape(draft_md or '')}</pre>"
+        draft_html = f"<pre style='white-space:pre-wrap'>{html.escape(draft_md or '')}</pre>"
 
-    # Parse structured sections for form boxes
+    appendix_section = ""
+    if include_appendix:
+        appendix_section = f"""
+  <div class="section">
+    <h2>Appendix: Full Draft (for submission/record)</h2>
+    {draft_html}
+  </div>
+"""
+
     sections = _split_md_sections(draft_md or "")
     opening = sections.get("Opening", "").strip()
     strengths = sections.get("Strengths", "").strip()
+    rubric_snapshot = sections.get("Rubric Snapshot", "").strip()
     recs = sections.get("Recommendations", "").strip()
     challenge = sections.get("One Challenge", "").strip()
 
-    align_summary, align_checks, align_reasons = _extract_alignment_checks(draft_md or "")
+    align_summary, align_checks, align_reasons, align_evidence = _extract_alignment_checks(draft_md or "")
 
     def esc(x):
         return html.escape("" if x is None else str(x))
@@ -557,24 +558,40 @@ def build_export_html_form(
 
     meeting_rows = "".join(
         [
-            row("Speaker", meeting.get("speaker", "")),
-            row("Evaluator", meeting.get("evaluator", "")),
-            row("Date", meeting.get("meeting_date", "")),
-            row("Speech Title", meeting.get("speech_title", "")),
+            row("Speaker", meeting.get("speaker_name") or meeting.get("speaker") or ""),
+            row("Evaluator", meeting.get("evaluator_name") or meeting.get("evaluator") or ""),
+            row("Date", meeting.get("meeting_date") or ""),
+            row("Speech Title", meeting.get("speech_title") or ""),
         ]
     )
     selection_rows = "".join(
         [
-            row("Pathway", selection.get("pathway", "")),
-            row("Level", selection.get("level", "")),
-            row("Project", selection.get("project", "")),
-            row("Target Speech Length", selection.get("speech_len", "")),
-            row("Project Purpose", selection.get("purpose", "")),
-            row("Level Focus", selection.get("level_focus", "")),
+            row("Pathway", selection.get("pathway") or ""),
+            row("Level", selection.get("level") or ""),
+            row("Project", selection.get("project") or ""),
+            row("Speech Length", selection.get("speech_len") or ""),
+            row("Project Purpose", selection.get("purpose") or ""),
+            row("Level Focus", selection.get("level_focus") or ""),
         ]
     )
 
-    # Render checklist as form-style ticks
+    def box_text(text: str) -> str:
+        text = (text or "").strip()
+        if not text:
+            return "<div class='lines'></div>"
+        try:
+            import markdown as md  # type: ignore
+            return md.markdown(text, extensions=["fenced_code"])
+        except Exception:
+            return f"<pre style='white-space:pre-wrap; margin:0'>{esc(text)}</pre>"
+
+    opening_html = box_text(opening)
+    strengths_html = box_text(strengths)
+    rubric_snapshot_html = box_text(rubric_snapshot)
+    recs_html = box_text(recs)
+    challenge_html = box_text(challenge)
+    evidence_html = box_text(align_evidence)
+
     def checkbox_line(label: str, checked: bool) -> str:
         box = "☑" if checked else "☐"
         return f"<div class='chk'><span class='box'>{box}</span><span>{esc(label)}</span></div>"
@@ -585,34 +602,10 @@ def build_export_html_form(
     if align_reasons:
         reasons_html = "<ul class='tight'>" + "".join(f"<li>{esc(r)}</li>" for r in align_reasons) + "</ul>"
 
-    # Helper to show plain text in a box (keep evaluator handwriting feel)
-    def box_text(text: str) -> str:
-        text = (text or "").strip()
-        if not text:
-            return "<div class='lines'></div>"
-        # Convert simple markdown bullets to HTML list inside box for readability
-        try:
-            import markdown as md  # type: ignore
-            return md.markdown(text, extensions=["fenced_code"])
-        except Exception:
-            return f"<pre style='white-space:pre-wrap; margin:0'>{esc(text)}</pre>"
-
-    opening_html = box_text(opening)
-    strengths_html = box_text(strengths)
-    recs_html = box_text(recs)
-    challenge_html = box_text(challenge)
-
-    # Signature lines
-    sig_table = f"""
+    sig_table = """
     <table class="sig">
-      <tr>
-        <th>Evaluator Signature</th>
-        <td class="sigline"></td>
-      </tr>
-      <tr>
-        <th>Date</th>
-        <td class="sigline"></td>
-      </tr>
+      <tr><th>Evaluator Signature</th><td class="sigline"></td></tr>
+      <tr><th>Date</th><td class="sigline"></td></tr>
     </table>
     """
 
@@ -624,102 +617,30 @@ def build_export_html_form(
   <title>{esc(title)}</title>
   <style>
     @page {{ size: A4; margin: 16mm; }}
-    body {{
-      font-family: Arial, Helvetica, sans-serif;
-      font-size: 11pt;
-      color: #000;
-    }}
-    h1 {{
-      font-size: 16pt;
-      margin: 0 0 4mm 0;
-      text-transform: uppercase;
-      letter-spacing: 0.3px;
-    }}
-    .sub {{
-      font-size: 10pt;
-      margin: 0 0 6mm 0;
-    }}
-    .section {{
-      border: 1px solid #000;
-      padding: 8px 10px;
-      margin-bottom: 4mm;
-      break-inside: avoid;
-    }}
-    .section h2 {{
-      font-size: 11pt;
-      margin: 0 0 2mm 0;
-      text-transform: uppercase;
-      letter-spacing: 0.2px;
-    }}
-    table.meta {{
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 10.5pt;
-    }}
-    table.meta th {{
-      text-align: left;
-      padding: 2mm 2mm 2mm 0;
-      width: 28%;
-      vertical-align: top;
-      font-weight: bold;
-    }}
-    table.meta td {{
-      padding: 2mm 0;
-      vertical-align: top;
-    }}
-    .two-col {{
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 4mm;
-    }}
-    .lines {{
-      height: 44mm;
-      background-image: linear-gradient(to bottom, transparent 0, transparent 19px, #d0d0d0 20px);
-      background-size: 100% 20px;
-      background-repeat: repeat-y;
-    }}
-    .tight ul, ul.tight {{
-      margin: 0;
-      padding-left: 18px;
-    }}
-    .chk {{
-      display: flex;
-      align-items: flex-start;
-      gap: 6px;
-      margin: 1.2mm 0;
-      font-size: 10.5pt;
-    }}
-    .box {{
-      width: 16px;
-      display: inline-block;
-    }}
-    .sig {{
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 10.5pt;
-    }}
-    .sig th {{
-      text-align:left;
-      width: 28%;
-      padding: 2mm 2mm 2mm 0;
-      font-weight: bold;
-    }}
-    .sigline {{
-      border-bottom: 1px solid #000;
-      height: 8mm;
-    }}
-    .footer-note {{
-      font-size: 9.5pt;
-      margin-top: 2mm;
-    }}
-    @media print {{
-      a {{ color: #000; text-decoration: none; }}
-    }}
+    body {{ font-family: Arial, Helvetica, sans-serif; font-size: 11pt; color:#000; }}
+    h1 {{ font-size: 16pt; margin: 0 0 4mm 0; text-transform: uppercase; letter-spacing: 0.3px; }}
+    .sub {{ font-size: 10pt; margin: 0 0 6mm 0; }}
+    .section {{ border: 1px solid #000; padding: 8px 10px; margin-bottom: 4mm; break-inside: avoid; }}
+    .section h2 {{ font-size: 11pt; margin: 0 0 2mm 0; text-transform: uppercase; letter-spacing: 0.2px; }}
+    table.meta {{ width: 100%; border-collapse: collapse; font-size: 10.5pt; }}
+    table.meta th {{ text-align: left; padding: 2mm 2mm 2mm 0; width: 28%; vertical-align: top; font-weight: bold; }}
+    table.meta td {{ padding: 2mm 0; vertical-align: top; }}
+    .two-col {{ display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; }}
+    .lines {{ height: 44mm; background-image: linear-gradient(to bottom, transparent 0, transparent 19px, #d0d0d0 20px);
+             background-size: 100% 20px; background-repeat: repeat-y; }}
+    .tight ul, ul.tight {{ margin: 0; padding-left: 18px; }}
+    .chk {{ display:flex; align-items:flex-start; gap:6px; margin:1.2mm 0; font-size:10.5pt; }}
+    .box {{ width:16px; display:inline-block; }}
+    .sig {{ width:100%; border-collapse: collapse; font-size:10.5pt; }}
+    .sig th {{ text-align:left; width:28%; padding:2mm 2mm 2mm 0; font-weight:bold; }}
+    .sigline {{ border-bottom: 1px solid #000; height: 8mm; }}
+    .footer-note {{ font-size: 9.5pt; margin-top: 2mm; }}
+    @media print {{ a {{ color:#000; text-decoration:none; }} }}
   </style>
 </head>
 <body>
   <h1>{esc(title)}</h1>
-  <div class="sub">Toastmasters Evaluation Assistant (T.E.A.) — Meeting-ready export layout</div>
+  <div class="sub">Toastmasters Evaluation Assistant (T.E.A.) — Meeting-ready export</div>
 
   <div class="section">
     <h2>Meeting Information</h2>
@@ -729,6 +650,11 @@ def build_export_html_form(
   <div class="section">
     <h2>Pathways Project & Objectives</h2>
     <table class="meta">{selection_rows}</table>
+  </div>
+
+  <div class="section">
+    <h2>Rubric Snapshot (1–5)</h2>
+    {rubric_snapshot_html}
   </div>
 
   <div class="section">
@@ -753,8 +679,13 @@ def build_export_html_form(
   </div>
 
   <div class="section">
-    <h2>Evaluator Alignment Checklist</h2>
+    <h2>Evaluator Alignment (Evidence)</h2>
     <div class="footer-note">{esc(align_summary) if align_summary else ""}</div>
+    {evidence_html}
+  </div>
+
+  <div class="section">
+    <h2>Evaluator Alignment Checklist</h2>
     {checklist_html}
     {reasons_html}
   </div>
@@ -764,19 +695,15 @@ def build_export_html_form(
     {sig_table}
   </div>
 
-  <div class="footer-note">Tip: For the cleanest PDF, open this HTML in Chrome/Edge → Print → Save as PDF.</div>
+  <div class="footer-note">Tip: For a clean PDF, Print → More settings → uncheck “Headers and footers”.</div>
 
-  <!-- Full draft (optional appendix for completeness) -->
-  <div class="section">
-    <h2>Appendix: Full Draft (for editing/record)</h2>
-    {md_html}
-  </div>
+  {appendix_section}
 </body>
 </html>"""
 
 
-def make_pdf_bytes_simple(title: str, body_text: str) -> bytes:
-    """Simple A4 PDF (plain text) for download (fallback)."""
+def make_pdf_bytes(title: str, body_text: str) -> bytes:
+    """Create a simple A4 PDF (plain text) for download."""
     if canvas is None or A4 is None or cm is None:
         return b""
 
@@ -786,9 +713,9 @@ def make_pdf_bytes_simple(title: str, body_text: str) -> bytes:
     x = 2 * cm
     y = height - 2 * cm
 
-    c.setFont("Helvetica-Bold", 13)
+    c.setFont("Helvetica-Bold", 14)
     c.drawString(x, y, title)
-    y -= 0.9 * cm
+    y -= 1.0 * cm
     c.setFont("Helvetica", 10)
 
     max_width = width - 4 * cm
@@ -830,6 +757,63 @@ def make_pdf_bytes_simple(title: str, body_text: str) -> bytes:
     return buf.getvalue()
 
 
+def extract_purpose_alignment(md: str) -> tuple[str, dict[str, bool]]:
+    """Extract a Purpose Alignment summary + checkbox checklist from the draft markdown.
+
+    Returns (summary, checks). If the section isn't present, falls back to simple heuristics.
+    """
+    md = md or ""
+    summary = ""
+    checks: dict[str, bool] = {
+        "Purpose clearly addressed": False,
+        "Level focus demonstrated": False,
+        "Feedback linked to evaluation criteria": False,
+        "Balanced commendations + improvements": False,
+        "Actionable next step provided": False,
+    }
+
+    # Locate the section
+    m = re.search(r"^##\s+Purpose\s+Alignment\s*$", md, flags=re.IGNORECASE | re.MULTILINE)
+    if m:
+        section = md[m.end():]
+        section = re.split(r"^##\s+", section, maxsplit=1, flags=re.MULTILINE)[0]
+        lines = [ln.rstrip() for ln in section.strip().splitlines()]
+
+        # Summary: first 1–2 non-empty lines before checklist
+        collected = []
+        for ln in lines:
+            if re.match(r"\s*-\s*\[(x| )\]", ln, flags=re.IGNORECASE):
+                break
+            if ln.strip() and not ln.strip().startswith("-"):
+                collected.append(ln.strip())
+            if len(collected) >= 2:
+                break
+        summary = " ".join(collected).strip()
+
+        # Checklist parsing
+        for ln in lines:
+            mm = re.match(r"\s*-\s*\[(x| )\]\s*(.+)\s*$", ln, flags=re.IGNORECASE)
+            if not mm:
+                continue
+            checked = mm.group(1).lower() == "x"
+            label = mm.group(2).strip().lower()
+            for k in list(checks.keys()):
+                kk = k.lower()
+                if kk in label or label in kk:
+                    checks[k] = checked
+
+    # Heuristic fallback (useful if model didn't include the section)
+    if not summary:
+        checks["Balanced commendations + improvements"] = (
+            "## Strengths" in md and "## Areas to Improve" in md
+        )
+        checks["Actionable next step provided"] = (
+            "## Suggested Next Steps" in md or "## One Challenge" in md
+        )
+
+    return summary, checks
+
+
 def render_header():
     logo_path = find_logo_path()
     h1, h2 = st.columns([1, 5], vertical_alignment="center")
@@ -837,11 +821,13 @@ def render_header():
         if logo_path:
             st.image(str(logo_path), use_container_width=True)
     with h2:
-        st.markdown("# Toastmasters Evaluation Assistant (T.E.A.)")
+        st.markdown("# Toastmasters Evaluation Assistant T.E.A.")
         st.caption(
-            "Turn rubric ratings + rough notes into a structured, project-aligned evaluation draft. "
-            "Export uses a form-style layout aligned to the official Toastmasters evaluation form."
+            "Objective of T.E.A. is to help speech evaluators turn rubric ratings + rough notes into a structured, "
+            "project-aligned evaluation draft, by retrieving the selected Pathways project purpose/level focus "
+            "from a local knowledge base and using CrewAI to generate an editable evaluation."
         )
+        st.caption("NYP ITI123 Application Development Project by Zhu Qihui, Oscar 9801937V")
 
 
 def render_step_indicator():
@@ -850,9 +836,15 @@ def render_step_indicator():
         ("Step 1/4", "Select Project Details", "select"),
         ("Step 2/4", "Load Project", "loading"),
         ("Step 3/4", "Evaluation Form", "evaluation"),
-        ("Step 4/4", "Draft & Export", "draft"),
+        ("Step 4/4", "Draft & Export", "draft_loading"),
     ]
-    page_to_idx = {"select": 0, "loading": 1, "evaluation": 2, "draft_loading": 3, "draft": 3}
+    page_to_idx = {
+        "select": 0,
+        "loading": 1,
+        "evaluation": 2,
+        "draft_loading": 3,
+        "draft": 3,
+    }
     idx = page_to_idx.get(page, 0)
 
     a, b, c, d = st.columns(4)
@@ -865,6 +857,7 @@ def render_step_indicator():
                 st.markdown(f"**✔ {label}**  \n{name}")
             else:
                 st.markdown(f"**◻ {label}**  \n{name}")
+
     st.progress((idx + 1) / 4)
 
 
@@ -877,15 +870,32 @@ if st.session_state.page == "select":
     st.subheader("Chapter Meeting Details")
     c1, c2, c3 = st.columns(3)
     with c1:
-        speaker_name = st.text_input("Speaker Name", value=st.session_state.meeting.get("speaker", ""), placeholder="e.g., Oscar Zhu")
+        speaker_name = st.text_input(
+            "Speaker Name",
+            value=st.session_state.meeting.get("speaker", ""),
+            placeholder="e.g., Oscar Zhu",
+        )
     with c2:
-        evaluator_name = st.text_input("Evaluator Name", value=st.session_state.meeting.get("evaluator", ""), placeholder="e.g., Lee Ching Yuh")
+        evaluator_name = st.text_input(
+            "Evaluator Name",
+            value=st.session_state.meeting.get("evaluator", ""),
+            placeholder="e.g., Lee Ching Yuh",
+        )
     with c3:
         meeting_date = st.date_input("Date of Chapter Meeting", value=st.session_state.meeting.get("date"))
 
-    speech_title = st.text_input("Speech Title", value=st.session_state.meeting.get("speech_title", ""), placeholder="e.g., Living with Dignity")
+    speech_title = st.text_input(
+        "Speech Title",
+        value=st.session_state.meeting.get("speech_title", ""),
+        placeholder="e.g., Living with Dignity or Charity",
+    )
 
-    st.session_state.meeting = {"speaker": speaker_name, "evaluator": evaluator_name, "date": meeting_date, "speech_title": speech_title}
+    st.session_state.meeting = {
+        "speaker": speaker_name,
+        "evaluator": evaluator_name,
+        "date": meeting_date,
+        "speech_title": speech_title,
+    }
 
     st.divider()
 
@@ -913,8 +923,7 @@ if st.session_state.page == "select":
 
     if clear:
         st.session_state.details = None
-        st.session_state.draft_md = ""
-        st.session_state.pending_generation = None
+        st.session_state.crewai_output = None
         st.session_state.page = "select"
         st.rerun()
 
@@ -922,11 +931,19 @@ if st.session_state.page == "select":
         level_block = extract_level_block(md_path, level)
         if not level_block:
             st.error(f"❌ Level '{level}' not found in {md_path.name}.")
+            st.info("Fix: Add heading like `## Level 2` into the markdown file.")
             st.stop()
 
         proj_block = extract_project_block(level_block, project)
         if not proj_block:
-            st.error(f"❌ '{project}' not found under **{level}** in **{md_path.name}**.")
+            st.error(
+                f"❌ '{project}' is not found under **{level}** in **{md_path.name}**.\n\n"
+                "✅ Please select the correct pathway OR add this project into the pathway markdown file."
+            )
+            available = re.findall(r"^###\s*Project:\s*(.+)\s*$", level_block, flags=re.IGNORECASE | re.MULTILINE)
+            if available:
+                st.caption("Projects currently found in this pathway + level:")
+                st.write(available)
             st.stop()
 
         level_focus = extract_level_focus(level_block) or "Not found"
@@ -946,10 +963,173 @@ if st.session_state.page == "select":
             "speech_len": speech_len,
             "md_path": str(md_path),
         }
+        st.session_state.crewai_output = None
+
         st.session_state.page = "loading"
         st.rerun()
 
     st.caption(f"Using file: {md_path}")
+
+
+# ==================== PAGE 4: Draft Loading ====================
+if st.session_state.page == "draft_loading":
+    render_header()
+    render_step_indicator()
+
+    pending = st.session_state.get("pending_generation") or {}
+    if not pending:
+        st.warning("No pending draft request found. Please generate from the Evaluation Form.")
+        if st.button("⬅ Back to Evaluation Form"):
+            st.session_state.page = "evaluation"
+            st.rerun()
+        st.stop()
+
+    st.subheader("Generating evaluation draft")
+    st.caption("Please wait… preparing your draft (minimum 3 seconds).")
+
+    # Minimum visible loading time
+    p = st.progress(0)
+    for i in range(30):
+        p.progress(int((i + 1) / 30 * 100))
+        time.sleep(0.1)
+
+    if run_crewai_eval is None:
+        output = "CrewAI module failed to import.\n\n" + (CREWAI_IMPORT_ERROR or "")
+    else:
+        with st.spinner("Running CrewAI…"):
+            output = run_crewai_eval(
+                notes=pending.get("notes_payload", ""),
+                pathway=pending.get("pathway", ""),
+                level=pending.get("level", ""),
+                project=pending.get("project", ""),
+                level_focus=pending.get("level_focus", ""),
+                purpose=pending.get("purpose", ""),
+                speech_len=pending.get("speech_len", ""),
+                criteria_text=pending.get("criteria_text", ""),
+                total_score=pending.get("total_score"),
+                score_label=pending.get("score_label", ""),
+            )
+
+    st.session_state.crewai_output = output
+    st.session_state.draft_md = output
+
+    meeting = pending.get("meeting", {})
+    selection = {
+        "pathway": pending.get("pathway"),
+        "level": pending.get("level"),
+        "project": pending.get("project"),
+        "speech_len": pending.get("speech_len"),
+    }
+    st.session_state.draft_html = build_export_html(
+        title="Toastmasters Evaluation Draft",
+        meeting=meeting,
+        selection=selection,
+        draft_md=output,
+    )
+
+    st.session_state.page = "draft"
+    st.rerun()
+
+
+# ==================== PAGE 5: Draft + Export ====================
+if st.session_state.page == "draft":
+    render_header()
+    render_step_indicator()
+
+    st.subheader("Evaluation draft (editable)")
+    draft_default = st.session_state.get("draft_md") or ""
+    edited = st.text_area(
+        "You can edit the draft below before exporting:",
+        value=draft_default,
+        height=520,
+        key="draft_editor",
+    )
+
+    # Purpose-alignment indicator (for report screenshots)
+    align_summary, align_checks = extract_purpose_alignment(edited)
+    with st.expander("Purpose alignment indicator (auto)", expanded=False):
+        if align_summary:
+            st.caption(align_summary)
+        for label, checked in align_checks.items():
+            st.checkbox(label, value=checked, disabled=True)
+
+    # Build filenames
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    md_name = f"tea_evaluation_draft_{ts}.md"
+    html_name = f"tea_evaluation_draft_{ts}.html"
+    pdf_name = f"tea_evaluation_draft_{ts}.pdf"
+
+    st.markdown("---")
+    st.subheader("Export")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.download_button(
+            "⬇️ Download Markdown",
+            data=edited.encode("utf-8"),
+            file_name=md_name,
+            mime="text/markdown",
+            use_container_width=True,
+        )
+    with c2:
+        # Rebuild HTML using the edited version (for PDF-print friendly output)
+        meeting = (st.session_state.get("pending_generation") or {}).get("meeting", {})
+        selection = {
+            "pathway": (st.session_state.get("pending_generation") or {}).get("pathway"),
+            "level": (st.session_state.get("pending_generation") or {}).get("level"),
+            "project": (st.session_state.get("pending_generation") or {}).get("project"),
+            "speech_len": (st.session_state.get("pending_generation") or {}).get("speech_len"),
+        }
+        html_out = build_export_html(
+            title="Toastmasters Evaluation Draft",
+            meeting=meeting,
+            selection=selection,
+            draft_md=edited,
+        )
+        st.download_button(
+            "⬇️ Download HTML (print to PDF)",
+            data=html_out.encode("utf-8"),
+            file_name=html_name,
+            mime="text/html",
+            use_container_width=True,
+        )
+    with c3:
+        pdf_bytes = make_pdf_bytes("Toastmasters Evaluation Draft", edited)
+        if not pdf_bytes:
+            st.download_button(
+                "⬇️ Download PDF",
+                data=b"",
+                file_name=pdf_name,
+                mime="application/pdf",
+                disabled=True,
+                use_container_width=True,
+            )
+            st.caption("PDF export needs ReportLab (reportlab>=4.0).")
+        else:
+            st.download_button(
+                "⬇️ Download PDF",
+                data=pdf_bytes,
+                file_name=pdf_name,
+                mime="application/pdf",
+                use_container_width=True,
+            )
+
+
+    st.caption(
+        "PDF tip: you can download PDF directly, or open the downloaded HTML in Chrome/Edge, then use Print → Save as PDF. "
+        "(This keeps formatting cleaner than copying from the app.)"
+    )
+
+    st.markdown("---")
+    back1, back2 = st.columns(2)
+    with back1:
+        if st.button("⬅ Back to Evaluation Form"):
+            st.session_state.page = "evaluation"
+            st.rerun()
+    with back2:
+        if st.button("🏠 Start Over"):
+            st.session_state.page = "select"
+            st.rerun()
+    st.stop()
 
 
 # ==================== PAGE 2: LOADING ====================
@@ -961,9 +1141,11 @@ if st.session_state.page == "loading":
     st.subheader("Loading project details…")
     st.caption("Please wait while we prepare the evaluation form.")
     bar = st.progress(0)
+
+    # >= 3 seconds
     for i in range(101):
         bar.progress(i)
-        time.sleep(0.02)
+        time.sleep(0.03)
 
     st.session_state.page = "evaluation"
     st.rerun()
@@ -979,7 +1161,7 @@ if st.session_state.page == "evaluation":
     render_step_indicator()
     st.divider()
 
-    top1, top2 = st.columns([1, 1])
+    top1, top2, top3 = st.columns([1, 1, 2])
     with top1:
         if st.button("⬅ Back"):
             st.session_state.page = "select"
@@ -987,8 +1169,7 @@ if st.session_state.page == "evaluation":
     with top2:
         if st.button("🧹 Clear All"):
             st.session_state.details = None
-            st.session_state.draft_md = ""
-            st.session_state.pending_generation = None
+            st.session_state.crewai_output = None
             st.session_state.page = "select"
             st.rerun()
 
@@ -997,20 +1178,52 @@ if st.session_state.page == "evaluation":
     meeting_date = meeting.get("date")
     meeting_date_str = str(meeting_date) if meeting_date else "N/A"
 
+    meeting_speech_title = (meeting.get("speech_title") or "").strip()
+
+    st.subheader("Chapter Meeting Details")
+    st.markdown('<div class="tea-narrow">', unsafe_allow_html=True)
+    with st.container(border=True):
+        a1, a2, a3 = st.columns([1.2, 1.2, 1.6])
+        with a1:
+            st.markdown('**Speaker**')
+            st.write(meeting.get('speaker') or 'N/A')
+        with a2:
+            st.markdown('**Evaluator**')
+            st.write(meeting.get('evaluator') or 'N/A')
+        with a3:
+            st.markdown('**Date**')
+            st.write(meeting_date_str)
+
+        st.markdown('---')
+        st.markdown('**Speech Title**')
+        st.write(meeting_speech_title or 'N/A')
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.divider()
+
+    # ---- Project Details (narrow centered box) ----
     st.subheader("Project Details")
     st.markdown('<div class="tea-narrow">', unsafe_allow_html=True)
     with st.container(border=True):
-        st.markdown("**Pathway**"); st.write(d["pathway"])
+        st.markdown("**Pathway**")
+        st.write(d["pathway"])
+
         st.markdown("---")
-        st.markdown("**Level focus**"); st.write(d["level_focus"])
+        st.markdown("**Level focus**")
+        st.write(d["level_focus"])
+
         st.markdown("---")
-        st.markdown("**Purpose**"); st.write(d["purpose"])
+        st.markdown("**Purpose**")
+        st.write(d["purpose"])
+
         st.markdown("---")
-        st.markdown("**Speech length**"); st.write(d["speech_len"])
+        st.markdown("**Speech length**")
+        st.write(d["speech_len"])
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.divider()
 
+    # ---- Rubrics ----
     st.subheader("Rubric Ratings (1–5)")
     st.caption("Rule: ratings 4–5 → Strengths, ratings 1–3 → Areas for improvement.")
 
@@ -1020,9 +1233,9 @@ if st.session_state.page == "evaluation":
 
     rubric_items = render_rubric_table(RUBRIC_DEF)
 
+    # ✅ Total score + legend
     total_score = compute_total_score(rubric_items)
     max_score = len(rubric_items) * 5
-    label, style = overall_band(total_score)
 
     st.subheader("Speaker's Competency Total Accumulated Score")
     cA, cB = st.columns([1.2, 2.8], vertical_alignment="center")
@@ -1031,6 +1244,17 @@ if st.session_state.page == "evaluation":
     with cB:
         st.progress(total_score / max_score if max_score else 0)
 
+    st.markdown("**Legend (Total Score Range)**")
+    st.markdown(
+        """
+- **36-40** → **Outstanding (Exceptional/Superior)**
+- **28–35** → **Proficient (Expertise/Mastery)**
+- **20–27** → **Competent (Meets Standard)**
+- **8–19** → **Needs Improvement (Below Standard)**
+"""
+    )
+
+    label, style = overall_band(total_score)
     if style == "success":
         st.success(f"Overall Result: {label}")
     elif style == "info":
@@ -1040,9 +1264,11 @@ if st.session_state.page == "evaluation":
     else:
         st.error(f"Overall Result: {label}")
 
+    # Strengths / Improvements (lists)
     strengths_text, improvements_text = build_rubric_summary(rubric_items)
 
     st.divider()
+
     s1, s2 = st.columns(2)
     with s1:
         st.markdown("### Strengths (4–5)")
@@ -1052,8 +1278,10 @@ if st.session_state.page == "evaluation":
         st.markdown(improvements_text)
 
     st.divider()
+
+    # ---- General comments ----
     st.subheader("General Comments - By Project Speech Evaluator")
-    st.caption("Tip: Fill at least one box OR add at least one rubric comment.")
+    st.caption("Tip: You can leave some boxes blank. At least one note/comment is needed before generating.")
 
     t1, t2 = st.columns(2)
     with t1:
@@ -1075,7 +1303,7 @@ Selected project context:
 - Pathway: {d["pathway"]}
 - Level: {d["level"]}
 - Project: {d["project"]}
-- Target speech length: {d["speech_len"]}
+- Speech length: {d["speech_len"]}
 
 Level focus:
 {d["level_focus"]}
@@ -1116,6 +1344,8 @@ To challenge yourself:
             if not has_general and not has_any_rubric_comment:
                 st.warning("Please add at least one rubric comment OR fill one general comment box before generating.")
             else:
+                # Save payload and navigate to a fresh Draft page.
+                # Everything Step 4 needs (use `.get()` when reading to avoid KeyError)
                 st.session_state.pending_generation = {
                     "notes_payload": notes_payload,
                     "pathway": d.get("pathway", ""),
@@ -1124,143 +1354,154 @@ To challenge yourself:
                     "level_focus": d.get("level_focus", ""),
                     "purpose": d.get("purpose", ""),
                     "speech_len": d.get("speech_len", ""),
+                    # Extra context to strengthen the CrewAI prompt
                     "criteria_text": selected_criteria_text,
                     "total_score": total_score,
+                    "max_score": max_score,
                     "score_band": label,
-                    "meeting": {
-                        "speaker": meeting.get("speaker", ""),
-                        "evaluator": meeting.get("evaluator", ""),
-                        "meeting_date": meeting_date_str,
-                        "speech_title": meeting.get("speech_title", ""),
-                    },
                 }
+                st.session_state.crewai_output = None
                 st.session_state.page = "draft_loading"
                 st.rerun()
 
     st.caption(f"Using file: {d.get('md_path', '')}")
 
 
-# ==================== PAGE 4: DRAFT LOADING ====================
+# ==================== PAGE 4: Draft Loading ====================
 if st.session_state.page == "draft_loading":
     render_header()
     render_step_indicator()
 
     pending = st.session_state.get("pending_generation") or {}
     if not pending:
-        st.warning("No pending draft request found. Please generate from the Evaluation Form.")
+        st.warning("No pending draft request found. Please generate from the Evaluation Form first.")
         if st.button("⬅ Back to Evaluation Form"):
             st.session_state.page = "evaluation"
             st.rerun()
         st.stop()
 
-    st.subheader("Generating evaluation draft")
-    st.caption("Please wait… preparing your draft (minimum 3 seconds).")
+    st.subheader("Generating Evaluation Draft")
+    st.caption("Please wait… this will show the draft on a fresh page.")
 
-    p = st.progress(0)
+    # Minimum 3-second progress bar (always)
+    progress = st.progress(0)
     for i in range(30):
-        p.progress(int((i + 1) / 30 * 100))
+        progress.progress((i + 1) / 30)
         time.sleep(0.1)
 
-    with st.spinner("Running CrewAI…"):
-        output = run_crewai_eval(
-            notes=pending.get("notes_payload", ""),
-            pathway=pending.get("pathway", ""),
-            level=pending.get("level", ""),
-            project=pending.get("project", ""),
-            level_focus=pending.get("level_focus", ""),
-            purpose=pending.get("purpose", ""),
-            speech_len=pending.get("speech_len", ""),
-            criteria_text=pending.get("criteria_text", ""),
-            speaker_name=(pending.get("meeting", {}) or {}).get("speaker", ""),
-            evaluator_name=(pending.get("meeting", {}) or {}).get("evaluator", ""),
-            meeting_date=(pending.get("meeting", {}) or {}).get("meeting_date", ""),
-            speech_title=(pending.get("meeting", {}) or {}).get("speech_title", ""),
-            total_score=pending.get("total_score"),
-            score_band=pending.get("score_band", ""),
-        )
+    # Then run CrewAI (may take longer)
+    if run_crewai_eval is None:
+        output = "CrewAI module failed to import.\n\n" + (CREWAI_IMPORT_ERROR or "")
+    else:
+        with st.spinner("Running CrewAI…"):
+            output = run_crewai_eval(
+                notes=pending.get("notes_payload", ""),
+                pathway=pending.get("pathway", ""),
+                level=pending.get("level", ""),
+                project=pending.get("project", ""),
+                level_focus=pending.get("level_focus", ""),
+                purpose=pending.get("purpose", ""),
+                speech_len=pending.get("speech_len", ""),
+            )
 
+    st.session_state.crewai_output = output
     st.session_state.draft_md = output
     st.session_state.page = "draft"
     st.rerun()
 
 
-# ==================== PAGE 5: DRAFT + EXPORT ====================
+# ==================== PAGE 5: Draft & Export ====================
 if st.session_state.page == "draft":
     render_header()
     render_step_indicator()
 
+    draft_md = st.session_state.get("draft_md") or st.session_state.get("crewai_output") or ""
     pending = st.session_state.get("pending_generation") or {}
-    meeting_export = (pending.get("meeting") or {}).copy()
 
-    st.subheader("Evaluation draft (editable)")
-    draft_default = st.session_state.get("draft_md") or ""
-    edited = st.text_area("You can edit the draft below before exporting:", value=draft_default, height=520, key="draft_editor")
+    st.subheader("Evaluation Draft (Editable)")
+    st.caption("Edit the draft if you want. Then export using the buttons below (print-to-PDF friendly).")
+
+    edited = st.text_area(
+        "Draft output",
+        value=draft_md,
+        height=520,
+        key="draft_editor",
+    )
 
     st.divider()
+    st.subheader("Export")
 
-    # Optional: show extracted purpose-alignment summary for screenshot/reporting
-    if purpose_alignment_summary is not None:
-        s = purpose_alignment_summary(edited)
-        if s:
-            st.caption(f"Purpose Alignment Summary: {s}")
-
-    st.subheader("Export (meeting-ready layout)")
-    st.caption("HTML export is styled to closely match the official Toastmasters evaluation form layout.")
-
-    # Build filenames
-    ts = time.strftime("%Y%m%d_%H%M%S")
-    md_name = f"tea_evaluation_draft_{ts}.md"
-    html_name = f"tea_evaluation_form_{ts}.html"
-    pdf_name = f"tea_evaluation_draft_{ts}.pdf"
-
+    # Build a clean HTML file for printing to PDF
+    meeting = st.session_state.get("meeting", {})
     selection = {
         "pathway": pending.get("pathway", ""),
         "level": pending.get("level", ""),
         "project": pending.get("project", ""),
         "speech_len": pending.get("speech_len", ""),
-        "purpose": pending.get("purpose", ""),
-        "level_focus": pending.get("level_focus", ""),
     }
 
-    html_out = build_export_html_form(
-        title="Evaluation Form (Toastmasters - Meeting Ready)",
-        meeting=meeting_export,
+    html_doc = build_export_html(
+        title="Toastmasters Evaluation Draft",
+        meeting=meeting,
         selection=selection,
         draft_md=edited,
     )
 
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    base = f"toastmasters_evaluation_{ts}"
+
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.download_button("⬇️ Download Markdown", data=edited.encode("utf-8"), file_name=md_name, mime="text/markdown", use_container_width=True)
-    with c2:
-        st.download_button("⬇️ Download HTML (Print → PDF)", data=html_out.encode("utf-8"), file_name=html_name, mime="text/html", use_container_width=True)
-    with c3:
-        pdf_bytes = make_pdf_bytes_simple("Toastmasters Evaluation Draft", edited)
         st.download_button(
-            "⬇️ Download PDF (simple)",
-            data=pdf_bytes if pdf_bytes else b"",
-            file_name=pdf_name,
-            mime="application/pdf",
-            disabled=not bool(pdf_bytes),
+            "Download Draft (.md)",
+            data=edited.encode("utf-8"),
+            file_name=f"{base}.md",
+            mime="text/markdown",
             use_container_width=True,
         )
-        if not pdf_bytes:
-            st.caption("Direct PDF needs ReportLab (reportlab>=4.0). HTML export is recommended for best formatting.")
+    with c2:
+        st.download_button(
+            "Download Print-to-PDF HTML (.html)",
+            data=html_doc.encode("utf-8"),
+            file_name=f"{base}.html",
+            mime="text/html",
+            use_container_width=True,
+        )
+    with c3:
+        st.download_button(
+            "Download Draft (.txt)",
+            data=edited.encode("utf-8"),
+            file_name=f"{base}.txt",
+            mime="text/plain",
+            use_container_width=True,
+        )
 
-    st.info("Best PDF quality: download the HTML → open in Chrome/Edge → Print → Save as PDF.")
+    st.info(
+        "For PDF: download the HTML, open it in Chrome, then use **Print → Save as PDF**. "
+        "(The HTML is styled to be print-friendly.)"
+    )
 
     st.divider()
-    back1, back2 = st.columns(2)
-    with back1:
-        if st.button("⬅ Back to Evaluation Form"):
+    b1, b2 = st.columns(2)
+    with b1:
+        if st.button("⬅ Back to Evaluation Form", use_container_width=True):
             st.session_state.page = "evaluation"
             st.rerun()
-    with back2:
-        if st.button("🏠 Start Over"):
+    with b2:
+        if st.button("Start New Evaluation", use_container_width=True):
+            for k in [
+                "details",
+                "meeting",
+                "ratings",
+                "rubric_comments",
+                "crewai_output",
+                "draft_md",
+                "pending_generation",
+                "draft_editor",
+            ]:
+                if k in st.session_state:
+                    del st.session_state[k]
             st.session_state.page = "select"
-            st.session_state.details = None
-            st.session_state.draft_md = ""
-            st.session_state.pending_generation = None
             st.rerun()
 
-    st.stop()
+

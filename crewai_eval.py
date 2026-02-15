@@ -1,21 +1,20 @@
 """CrewAI evaluation generator for Toastmasters Evaluation Assistant (T.E.A.).
 
-Key goals:
-- Robust generation: works with CrewAI when available; falls back to a single LLM call.
-- Meeting-ready output: markdown structured in a way that can be exported into a form-like PDF/HTML layout.
+Submission version features:
+- Robust generation: uses CrewAI when available; falls back to a single LLM call.
+- Meeting-ready structure: Markdown with clear headings that map to the export form layout.
+- Anti-hallucination Purpose Alignment: evidence-bound claims + "Insufficient evidence..." fallback.
+- Includes "Rubric Snapshot" so rubric ratings/comments appear in exports.
 
 App expects:
     from crewai_eval import run_crewai_eval
-
-Optional helper (used by reports / screenshots):
-    from crewai_eval import purpose_alignment_summary
 """
 
 from __future__ import annotations
 
 import os
 import re
-from typing import Optional, Dict, Tuple
+from typing import Optional
 
 
 def _get_setting(key: str, default: str = "") -> str:
@@ -57,10 +56,7 @@ def _fallback_llm(prompt: str, api_key: str, model: str) -> str:
             chat = client.chat.completions.create(
                 model=model,
                 messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a Toastmasters speech evaluation assistant.",
-                    },
+                    {"role": "system", "content": "You are a Toastmasters speech evaluation assistant."},
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.4,
@@ -76,19 +72,12 @@ def _fallback_llm(prompt: str, api_key: str, model: str) -> str:
 
 
 def purpose_alignment_summary(md_text: str) -> str:
-    """Lightweight summary extractor used for reports/snapshots.
-
-    Returns a short 1–2 sentence summary if a Purpose Alignment section exists,
-    else returns an empty string.
-
-    This keeps the app flexible: your export layout can place this summary near the checkbox block.
-    """
+    """Extract a short 1–2 sentence summary from the Purpose Alignment section (if present)."""
     md = (md_text or "").strip()
     if not md:
         return ""
 
-    # Find "Purpose Alignment" section (allow # / ##)
-    m = re.search(r"^#{1,3}\s+Purpose\s+Alignment\s*$", md, flags=re.IGNORECASE | re.MULTILINE)
+    m = re.search(r"^#{1,3}\s+Purpose\s+Alignment.*$", md, flags=re.IGNORECASE | re.MULTILINE)
     if not m:
         return ""
 
@@ -96,12 +85,13 @@ def purpose_alignment_summary(md_text: str) -> str:
     section = re.split(r"^#{1,3}\s+", section, maxsplit=1, flags=re.MULTILINE)[0].strip()
     lines = [ln.strip() for ln in section.splitlines() if ln.strip()]
 
-    # Return first 1–2 non-checklist lines
     out = []
     for ln in lines:
         if re.match(r"^-\s*\[(x| )\]\s+", ln, flags=re.IGNORECASE):
             break
-        if ln.startswith("-"):
+        if ln.lower().startswith("evidence:"):
+            continue
+        if ln.startswith("-") and not ln.lower().startswith("- alignment claim"):
             continue
         out.append(ln)
         if len(out) >= 2:
@@ -127,22 +117,14 @@ def run_crewai_eval(
     score_band: str = "",
     **_ignored: object,
 ) -> str:
-    """Generate an editable evaluation draft (Markdown).
-
-    Returns a single markdown string.
-
-    Extra keyword args are accepted for forward-compatibility with the Streamlit app.
-    """
-
+    """Generate an evaluation draft (Markdown). Extra kwargs are accepted for forward compatibility."""
     api_key = _get_setting("OPENAI_API_KEY", "")
     model = _get_setting("OPENAI_MODEL", "gpt-4o-mini")
 
     if not api_key:
         return (
             "❌ Missing OPENAI_API_KEY.\n\n"
-            "Add it in Streamlit secrets (recommended):\n"
-            "- Streamlit Cloud: App → Settings → Secrets\n"
-            "- Local: create .streamlit/secrets.toml\n\n"
+            "Add it in Streamlit secrets (recommended) or environment variables.\n"
             "Example secrets.toml:\n"
             "OPENAI_API_KEY = \"sk-...\"\n"
             "OPENAI_MODEL = \"gpt-4o-mini\"\n"
@@ -157,7 +139,7 @@ You are the Toastmasters Evaluation Assistant (T.E.A.).
 
 Goal:
 Turn the evaluator's rubric ratings + rough notes into a clear, kind, and project-aligned evaluation draft
-that is suitable for a real Toastmasters club meeting.
+suitable for a real Toastmasters club meeting.
 
 Meeting details:
 - Speaker: {speaker_name or "(not provided)"}
@@ -174,7 +156,7 @@ Pathways context:
 - Level Focus: {level_focus}
 - Target speech length: {speech_len}
 
-Evaluation criteria reference (for the evaluator to stay consistent):
+Evaluation criteria reference (rubric meaning):
 {criteria_text.strip() or "(No criteria text provided)"}
 
 Evaluator input (rubric summary + comments + general notes):
@@ -183,6 +165,7 @@ Evaluator input (rubric summary + comments + general notes):
 Write the output as a structured evaluation draft in plain English.
 
 Required structure (use Markdown headings exactly):
+
 ## Opening
 Write 2–3 sentences (~40–70 words). The opening should:
 - Thank the speaker and mention the speech title
@@ -200,10 +183,13 @@ Write 3–5 bullet points. Each bullet should be ~20–30 words and should:
 - Do NOT invent comments. If a comment is missing, write "(no comment)".
 
 ## Recommendations
-- Bullet points that map back to rubric improvement areas and notes
+Write 3–5 bullet points (~18–28 words each). Each bullet should:
+- State one improvement area
+- Include a brief explanation or example from the notes
+- Link back to evaluation criteria where possible
 
 ## One Challenge
-(1–2 sentences, very actionable)
+Write 1–2 sentences (~25–45 words). Make it very actionable and phrased as the next step.
 
 ## Purpose Alignment (Evidence-bound, anti-hallucination)
 Write an evidence-based alignment summary. You may ONLY make alignment claims that are directly supported by:
@@ -211,6 +197,8 @@ Write an evidence-based alignment summary. You may ONLY make alignment claims th
 (b) the stated Level Focus
 (c) the evaluator’s rubric ratings/comments
 (d) the evaluator’s general comments
+
+Do not restate the project purpose verbatim unless it is used as Evidence.
 
 For each claim, you MUST include an Evidence line quoting or paraphrasing from the provided notes.
 If there is insufficient evidence, write: "Insufficient evidence in the provided notes to confirm this."
@@ -232,13 +220,12 @@ Format exactly:
 ### Why (2–3 bullets)
 - <bullet explaining which evidence supports checked items and what is missing if unchecked>
 
-
 Rules:
-- Reuse rubric comments explicitly: in Strengths/Recommendations, reference the evaluator's rubric notes and ratings (paraphrase or short quotes) instead of general statements.
-- Be specific (use examples where available), but do not invent details.
+- Reuse rubric comments explicitly: reference the evaluator's rubric notes and ratings (paraphrase or short quotes) instead of generic statements.
+- Be specific, but do not invent details.
 - If details are missing, use "Based on the notes provided..." and keep it general.
 - Tone: supportive, respectful, Toastmasters-appropriate.
-- Output Markdown only. No tables unless necessary.
+- Output Markdown only.
 """.strip()
 
     # --- Try CrewAI ---
@@ -248,7 +235,6 @@ Rules:
         llm = None
         try:
             from crewai import LLM  # type: ignore
-
             llm = LLM(model=model, api_key=api_key)
         except Exception:
             llm = None
@@ -263,8 +249,8 @@ Rules:
 
         alignment = Agent(
             role="Alignment Checker",
-            goal="Ensure the draft explicitly aligns to Project Purpose and Level Focus.",
-            backstory="You ensure evaluations are objective, rubric-aligned, and project-relevant.",
+            goal="Ensure the draft follows the required headings and the Purpose Alignment section is evidence-bound.",
+            backstory="You ensure evaluations are objective, rubric-aligned, and project-relevant with audit-ready evidence.",
             llm=llm,
             verbose=False,
         )
@@ -277,9 +263,10 @@ Rules:
 
         check_task = Task(
             description=(
-                "Review the evaluation draft and ensure headings match exactly: "
-                "Opening, Strengths, Recommendations, One Challenge, Purpose Alignment. "
-                "Repair the Purpose Alignment checklist if missing. Keep Markdown only."
+                "Review the evaluation draft. Ensure headings match exactly: "
+                "Opening, Strengths, Rubric Snapshot, Recommendations, One Challenge, Purpose Alignment. "
+                "Ensure Purpose Alignment uses the Evidence-backed format with Evidence lines. "
+                "Repair any missing checklist items. Keep Markdown only."
             ),
             expected_output="The improved final markdown draft.",
             agent=alignment,
