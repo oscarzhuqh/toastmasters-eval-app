@@ -1100,6 +1100,8 @@ if st.session_state.page == "draft_loading":
         "level": pending.get("level"),
         "project": pending.get("project"),
         "speech_len": pending.get("speech_len"),
+        "purpose": pending.get("purpose"),
+        "level_focus": pending.get("level_focus"),
     }
     st.session_state.draft_html = build_export_html(
         title="Toastmasters Evaluation Draft",
@@ -1153,12 +1155,14 @@ if st.session_state.page == "draft":
         )
     with c2:
         # Rebuild HTML using the edited version (for PDF-print friendly output)
-        meeting = (st.session_state.get("pending_generation") or {}).get("meeting", {})
+        meeting = (st.session_state.get("pending_generation") or {}).get("meeting") or st.session_state.get("meeting", {})
         selection = {
             "pathway": (st.session_state.get("pending_generation") or {}).get("pathway"),
             "level": (st.session_state.get("pending_generation") or {}).get("level"),
             "project": (st.session_state.get("pending_generation") or {}).get("project"),
             "speech_len": (st.session_state.get("pending_generation") or {}).get("speech_len"),
+            "purpose": (st.session_state.get("pending_generation") or {}).get("purpose"),
+            "level_focus": (st.session_state.get("pending_generation") or {}).get("level_focus"),
         }
         html_out = build_export_html(
             title="Toastmasters Evaluation Draft",
@@ -1429,6 +1433,7 @@ To challenge yourself:
                 # Everything Step 4 needs (use `.get()` when reading to avoid KeyError)
                 st.session_state.pending_generation = {
                     "notes_payload": notes_payload,
+                    "meeting": dict(st.session_state.get("meeting", {})),
                     "pathway": d.get("pathway", ""),
                     "level": d.get("level", ""),
                     "project": d.get("project", ""),
