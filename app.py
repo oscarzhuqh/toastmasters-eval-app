@@ -584,6 +584,7 @@ def build_export_html(
     selection: dict,
     draft_md: str,
     include_appendix: bool = True,
+    alignment_override: dict[str, bool] | None = None,
 ) -> str:
     """Create a meeting-ready, print-to-PDF-friendly HTML file (Toastmasters-form style)."""
 
@@ -676,13 +677,17 @@ def build_export_html(
         "### Checklist (auto)",
         "### Alignment Checklist (Evidence-Based)\nChecked items are derived from the evidence listed above."
     )
+    # Normalize common model formatting issues (prevent run-on lines)
+    align_evidence = re.sub(r"\s+-\s*Alignment claim:", "\n- Alignment claim:", align_evidence)
+    align_evidence = re.sub(r"\s+###\s+", "\n### ", align_evidence)
     evidence_html = f"<div class='evidence'>{esc(align_evidence)}</div>"
 
     def checkbox_line(label: str, checked: bool) -> str:
         box = "☑" if checked else "☐"
         return f"<div class='chk'><span class='box'>{box}</span><span>{esc(label)}</span></div>"
 
-    checklist_html = "".join(checkbox_line(k, v) for k, v in align_checks.items())
+    checks_for_export = alignment_override if alignment_override is not None else align_checks
+    checklist_html = "".join(checkbox_line(k, v) for k, v in checks_for_export.items())
 
     reasons_html = ""
     if align_reasons:
@@ -1133,13 +1138,29 @@ if st.session_state.page == "draft":
         key="draft_editor",
     )
 
-    # Purpose-alignment indicator (for report screenshots)
+    # Purpose-alignment indicator (AI-suggested; human-confirmed before export)
     align_summary, align_checks = extract_purpose_alignment(edited)
-    with st.expander("Purpose alignment indicator (auto)", expanded=False):
+
+    # Light cleanup to avoid single-line dumps when the model concatenates claims
+    if align_summary:
+        align_summary = re.sub(r"\s+-\s*Alignment claim:", "\n- Alignment claim:", align_summary)
+        align_summary = re.sub(r"\s+###\s+", "\n### ", align_summary)
+
+    align_checks_user: dict[str, bool] = {}
+    with st.expander("Purpose alignment indicator (AI-suggested)", expanded=False):
+        st.caption("AI suggests these indicators from the evidence. Please review and adjust before exporting.")
         if align_summary:
-            st.caption(align_summary)
+            st.text(align_summary)
+        st.markdown("**Indicators (editable):**")
         for label, checked in align_checks.items():
-            st.checkbox(label, value=checked, disabled=True)
+            key = "align_chk_" + re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")
+            align_checks_user[label] = st.checkbox(label, value=checked, key=key)
+
+        evaluator_confirmed = st.checkbox(
+            "I have reviewed and confirm these alignment indicators for export.",
+            value=False,
+            key="align_confirm",
+        )
 
     # Build filenames
     ts = time.strftime("%Y%m%d_%H%M%S")
