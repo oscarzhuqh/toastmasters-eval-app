@@ -412,7 +412,13 @@ def _split_md_sections(md_text: str) -> dict:
 
 
 def _extract_alignment_checks(md_text: str) -> tuple[str, dict[str, bool], list[str]]:
-    """Extract Purpose Alignment summary + checklist + reason bullets."""
+    """Extract Purpose Alignment summary + checklist + reason bullets.
+
+    Anti-hallucination logic:
+    - If Evidence lines are missing, force all checklist items to False.
+    - If Evidence lines contain "Insufficient evidence...", force the related checklist items to False
+      even if the model checked them.
+    """
     checks = {
         "Purpose clearly addressed": False,
         "Level focus demonstrated": False,
@@ -427,6 +433,61 @@ def _extract_alignment_checks(md_text: str) -> tuple[str, dict[str, bool], list[
     block = sections.get("Purpose Alignment") or sections.get("Purpose alignment") or ""
     if not block:
         return summary, checks, reasons
+
+    lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
+
+    # Summary: first 1–2 non-checklist lines
+    collected = []
+    for ln in lines:
+        if re.match(r"^\-\s*\[(x| )\]\s+", ln, flags=re.IGNORECASE):
+            break
+        if ln.lower().startswith("evidence:"):
+            continue
+        if ln.startswith("-") and not ln.lower().startswith("- alignment claim"):
+            continue
+        collected.append(ln)
+        if len(collected) >= 2:
+            break
+    summary = " ".join(collected).strip()
+
+    # Parse checklist (if present)
+    for ln in lines:
+        mm = re.match(r"^\-\s*\[(x| )\]\s*(.+?)\s*$", ln, flags=re.IGNORECASE)
+        if not mm:
+            continue
+        checked = mm.group(1).lower() == "x"
+        label = mm.group(2).strip().lower()
+        for k in list(checks.keys()):
+            kk = k.lower()
+            if kk in label or label in kk:
+                checks[k] = checked
+
+    # Reasons: bullets (best effort)
+    for ln in lines:
+        if re.match(r"^\-\s*\[(x| )\]\s+", ln, flags=re.IGNORECASE):
+            continue
+        if ln.startswith("-") and not ln.lower().startswith("- alignment claim"):
+            reasons.append(ln.lstrip("-").strip())
+    reasons = [r for r in reasons if r and len(r) <= 180][:3]
+
+    # --- Evidence binding enforcement ---
+    evidence_lines = [ln for ln in lines if ln.lower().startswith("evidence:")]
+    if not evidence_lines:
+        for k in checks:
+            checks[k] = False
+        return summary, checks, reasons
+
+    insufficient = any("insufficient evidence" in ln.lower() for ln in evidence_lines)
+    if insufficient:
+        checks["Purpose clearly addressed"] = False
+        checks["Level focus demonstrated"] = False
+
+    has_rubric_hint = any(("rubric" in ln.lower() or "/5" in ln or "criteria" in ln.lower()) for ln in evidence_lines)
+    if not has_rubric_hint:
+        checks["Feedback linked to evaluation criteria"] = False
+
+    return summary, checks, reasons
+
 
     lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
     # Summary: first 1–2 non-checklist lines

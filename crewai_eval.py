@@ -205,21 +205,33 @@ Write 3–5 bullet points. Each bullet should be ~20–30 words and should:
 ## One Challenge
 (1–2 sentences, very actionable)
 
-## Purpose Alignment
-- 1–2 sentence summary of how the speech aligns to Purpose + Level focus.
-- Checkbox checklist (Markdown task list):
-  - [ ] Purpose clearly addressed
-  - [ ] Level focus demonstrated
-  - [ ] Feedback linked to evaluation criteria
-  - [ ] Balanced commendations + improvements
-  - [ ] Actionable next step provided
-- 2–3 short bullets explaining why items are checked/unchecked.
+## Purpose Alignment (Evidence-bound, anti-hallucination)
+Write an evidence-based alignment summary. You may ONLY make alignment claims that are directly supported by:
+(a) the stated Project Purpose
+(b) the stated Level Focus
+(c) the evaluator’s rubric ratings/comments
+(d) the evaluator’s general comments
 
-Length guidance:
-- Opening: 2–3 sentences (~40–70 words)
-- Strengths: 3–5 bullets (~20–30 words each)
-- Recommendations: 3–5 bullets (~18–28 words each)
-- One Challenge: 1–2 sentences (~25–45 words)
+For each claim, you MUST include an Evidence line quoting or paraphrasing from the provided notes.
+If there is insufficient evidence, write: "Insufficient evidence in the provided notes to confirm this."
+
+Format exactly:
+### Evidence-backed alignment
+- Alignment claim: <short claim>
+  Evidence: <quote/paraphrase from Purpose/Level Focus/Rubric/Comments OR the insufficient-evidence sentence>
+
+(Write 2–3 claim/evidence pairs.)
+
+### Checklist (auto)
+- [ ] Purpose clearly addressed
+- [ ] Level focus demonstrated
+- [ ] Feedback linked to evaluation criteria
+- [ ] Balanced commendations + improvements
+- [ ] Actionable next step provided
+
+### Why (2–3 bullets)
+- <bullet explaining which evidence supports checked items and what is missing if unchecked>
+
 
 Rules:
 - Reuse rubric comments explicitly: in Strengths/Recommendations, reference the evaluator's rubric notes and ratings (paraphrase or short quotes) instead of general statements.
