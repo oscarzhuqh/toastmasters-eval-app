@@ -296,14 +296,30 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-      textarea { background-color: #EAF0FF !important; }
-      div[data-testid="stVerticalBlock"] > div { gap: 0.55rem; }
+      /* === Mobile-safe input visibility fix === */
+      textarea, input {
+        background-color: #EAF0FF !important;
+        color: #000000 !important;
+      }
+
+      textarea::placeholder, input::placeholder {
+        color: #555555 !important;
+      }
+
+      div[data-testid="stVerticalBlock"] > div {
+        gap: 0.55rem;
+      }
+
       /* Make the central project-details box feel less wide */
-      .tea-narrow { max-width: 680px; margin: 0 auto; }
+      .tea-narrow {
+        max-width: 680px;
+        margin: 0 auto;
+      }
     </style>
     """,
     unsafe_allow_html=True,
 )
+
 
 
 # ==================== HELPERS ====================
