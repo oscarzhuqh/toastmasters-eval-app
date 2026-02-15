@@ -578,6 +578,17 @@ def _ensure_purpose_alignment_evidence(draft_md: str, purpose: str, level_focus:
     return rebuilt
 
 
+
+def _strip_md_fences(md_text: str) -> str:
+    """Remove ```markdown / ``` fences if the whole draft is wrapped (appendix cleanliness)."""
+    md = (md_text or "").strip()
+    if not md:
+        return md
+    md = re.sub(r'^```\s*(markdown|md)?\s*\n', '', md, flags=re.IGNORECASE)
+    md = re.sub(r'\n```\s*$', '', md)
+    return md
+
+
 def build_export_html(
     title: str,
     meeting: dict,
@@ -677,22 +688,41 @@ def build_export_html(
         "### Alignment Checklist (Evidence-Based)\nChecked items are derived from the evidence listed above."
     )
         # Clean alignment evidence for meeting view (no markdown leakage)
-    lines = []
-    for ln in (align_evidence or '').splitlines():
-        ln = ln.strip()
-        if not ln:
+    raw = (align_evidence or "").strip()
+
+    # Extract claims/evidence even if multiple items are on one long line
+    pieces: list[str] = []
+    # Prefer Evidence sentences first (most concrete), else claims
+    evidence_hits = re.findall(r"(?i)\bEvidence\s*:\s*([^#\n]+)", raw)
+    claim_hits = re.findall(r"(?i)\bAlignment\s+claim\s*:\s*([^#\n]+)", raw)
+
+    for x in evidence_hits:
+        t = re.sub(r"\s+", " ", x).strip(" -•\t")
+        if t:
+            pieces.append(t)
+
+    if not pieces:
+        for x in claim_hits:
+            t = re.sub(r"\s+", " ", x).strip(" -•\t")
+            if t:
+                pieces.append(t)
+
+    # Dedupe while preserving order
+    seen: set[str] = set()
+    cleaned: list[str] = []
+    for p in pieces:
+        key = p.lower()
+        if key in seen:
             continue
-        if ln.lower().startswith('evidence:'):
-            lines.append(ln.replace('Evidence:', '').strip())
-        elif ln.lower().startswith('- alignment claim:'):
-            lines.append(ln.replace('- Alignment claim:', '').strip())
-        if len(lines) >= 3:
+        seen.add(key)
+        cleaned.append(p)
+        if len(cleaned) >= 3:
             break
 
-    if not lines:
-        lines = ['See appendix for evidence-backed alignment details.']
+    if not cleaned:
+        cleaned = ["See appendix for evidence-backed alignment details."]
 
-    bullets = ''.join([f'<li>{esc(x)}</li>' for x in lines])
+    bullets = "".join([f"<li>{esc(x)}</li>" for x in cleaned])
     evidence_html = f"<ul class='evidence'>{bullets}</ul>"
 
     def checkbox_line(label: str, checked: bool) -> str:
