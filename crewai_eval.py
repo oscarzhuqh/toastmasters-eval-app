@@ -195,6 +195,10 @@ Write 3–5 bullet points. Each bullet should be ~20–30 words and should:
 - Include a brief explanation or example from the notes
 - Link back to evaluation criteria where possible
 
+## Rubric Snapshot
+- Include a compact list of the rubric items as provided (criterion, rating/5, and the evaluator's short comment if any).
+- Do NOT invent comments. If a comment is missing, write "(no comment)".
+
 ## Recommendations
 - Bullet points that map back to rubric improvement areas and notes
 
@@ -218,6 +222,7 @@ Length guidance:
 - One Challenge: 1–2 sentences (~25–45 words)
 
 Rules:
+- Reuse rubric comments explicitly: in Strengths/Recommendations, reference the evaluator's rubric notes and ratings (paraphrase or short quotes) instead of general statements.
 - Be specific (use examples where available), but do not invent details.
 - If details are missing, use "Based on the notes provided..." and keep it general.
 - Tone: supportive, respectful, Toastmasters-appropriate.
