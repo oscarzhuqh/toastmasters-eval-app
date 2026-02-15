@@ -516,6 +516,62 @@ def build_selected_criteria_text(project: str, rubric_items):
     return "\n".join(lines)
 
 
+
+def _ensure_purpose_alignment_evidence(draft_md: str, purpose: str, level_focus: str, rubric_snapshot: str) -> str:
+    """If Purpose Alignment section lacks 'Evidence:' lines, inject conservative Evidence lines.
+
+    Evidence is derived only from:
+    - Project purpose / level focus (from selection metadata)
+    - Rubric Snapshot lines (if present in the draft)
+    """
+    md = (draft_md or "").strip()
+    if not md:
+        return md
+
+    m = re.search(r"(?mi)^\s*##\s+Purpose\s+Alignment\s*$", md)
+    if not m:
+        return md
+
+    start = m.end()
+    rest = md[start:]
+    end_match = re.search(r"(?mi)^\s*##\s+\S", rest)
+    section = rest[: end_match.start()] if end_match else rest
+    after = rest[end_match.start():] if end_match else ""
+
+    if re.search(r"(?mi)^\s*Evidence\s*:", section):
+        return md
+
+    rs_lines = [ln.strip("- ").strip() for ln in (rubric_snapshot or "").splitlines() if "/5" in ln][:2]
+    rs_hint = "; ".join(rs_lines) if rs_lines else "rubric ratings/comments provided"
+    purpose_hint = (purpose or "").strip()
+    level_hint = (level_focus or "").strip()
+
+    ev_parts = []
+    if purpose_hint:
+        ev_parts.append(f'Project purpose: "{purpose_hint}"')
+    if level_hint:
+        ev_parts.append(f'Level focus: "{level_hint}"')
+    ev_parts.append(f"Rubric snapshot: {rs_hint}")
+
+    evidence_sentence = "Evidence: Based on " + "; ".join(ev_parts) + "."
+
+    lines = section.splitlines()
+    new_lines = []
+    inserted_any = False
+    for ln in lines:
+        new_lines.append(ln)
+        if re.match(r"(?i)^\s*-\s*Alignment\s+claim\s*:", ln):
+            new_lines.append("  " + evidence_sentence)
+            inserted_any = True
+
+    if not inserted_any:
+        new_lines.insert(0, evidence_sentence)
+
+    new_section = "\n".join(new_lines).rstrip() + "\n"
+    rebuilt = md[:start] + new_section + after
+    return rebuilt
+
+
 def build_export_html(
     title: str,
     meeting: dict,
@@ -524,6 +580,15 @@ def build_export_html(
     include_appendix: bool = True,
 ) -> str:
     """Create a meeting-ready, print-to-PDF-friendly HTML file (Toastmasters-form style)."""
+
+    # Ensure Purpose Alignment includes Evidence lines (anti-hallucination auditability)
+    draft_md = _ensure_purpose_alignment_evidence(
+        draft_md=draft_md,
+        purpose=str(selection.get('purpose') or ''),
+        level_focus=str(selection.get('level_focus') or ''),
+        rubric_snapshot=str(_split_md_sections(draft_md or '').get('Rubric Snapshot', '')).strip(),
+    )
+
 
     # Markdown -> HTML (appendix)
     try:
