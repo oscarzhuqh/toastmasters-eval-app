@@ -676,7 +676,24 @@ def build_export_html(
         "### Checklist (auto)",
         "### Alignment Checklist (Evidence-Based)\nChecked items are derived from the evidence listed above."
     )
-    evidence_html = f"<div class='evidence'>{esc(align_evidence)}</div>"
+        # Clean alignment evidence for meeting view (no markdown leakage)
+    lines = []
+    for ln in (align_evidence or '').splitlines():
+        ln = ln.strip()
+        if not ln:
+            continue
+        if ln.lower().startswith('evidence:'):
+            lines.append(ln.replace('Evidence:', '').strip())
+        elif ln.lower().startswith('- alignment claim:'):
+            lines.append(ln.replace('- Alignment claim:', '').strip())
+        if len(lines) >= 3:
+            break
+
+    if not lines:
+        lines = ['See appendix for evidence-backed alignment details.']
+
+    bullets = ''.join([f'<li>{esc(x)}</li>' for x in lines])
+    evidence_html = f"<ul class='evidence'>{bullets}</ul>"
 
     def checkbox_line(label: str, checked: bool) -> str:
         box = "☑" if checked else "☐"
@@ -1175,7 +1192,7 @@ if st.session_state.page == "draft":
     with st.expander("Purpose alignment indicator (AI-suggested)", expanded=False):
         st.caption("AI suggests these indicators from the evidence. Please review and adjust before exporting.")
         if align_evidence:
-            st.text_area("Evidence (from draft)", value=align_evidence, height=120, disabled=True)
+            st.text_area("Evidence (from draft)", value=align_evidence, height=220, disabled=True)
 
         st.markdown("**Indicators (editable):**")
         if "align_overrides" not in st.session_state:
