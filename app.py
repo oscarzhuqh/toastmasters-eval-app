@@ -684,7 +684,7 @@ def build_export_html(
     challenge_html = box_text(challenge)
     align_evidence = (align_evidence or "")
     align_evidence = align_evidence.replace(
-        "### Checklist (auto)",
+        "### Alignment Checklist (Evidence-Based)",
         "### Alignment Checklist (Evidence-Based)\nChecked items are derived from the evidence listed above."
     )
         # Clean alignment evidence for meeting view (no markdown leakage)
@@ -1222,7 +1222,10 @@ if st.session_state.page == "draft":
     with st.expander("Purpose alignment indicator (AI-suggested)", expanded=False):
         st.caption("AI suggests these indicators from the evidence. Please review and adjust before exporting.")
         if align_evidence:
-            st.text_area("Evidence (from draft)", value=align_evidence, height=220, disabled=True)
+            align_evidence = (align_evidence or "")
+            align_evidence = align_evidence.replace("### Alignment Checklist (Evidence-Based)", "### Alignment Checklist (Evidence-Based)")
+            align_evidence = align_evidence.replace("Alignment Checklist (Evidence-Based)", "Alignment Checklist (Evidence-Based)")
+            st.text_area("Evidence (from draft)", value=align_evidence, height=240, disabled=False)
 
         st.markdown("**Indicators (editable):**")
         if "align_overrides" not in st.session_state:
