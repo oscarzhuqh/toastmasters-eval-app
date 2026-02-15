@@ -584,7 +584,6 @@ def build_export_html(
     selection: dict,
     draft_md: str,
     include_appendix: bool = True,
-    alignment_override: dict[str, bool] | None = None,
 ) -> str:
     """Create a meeting-ready, print-to-PDF-friendly HTML file (Toastmasters-form style)."""
 
@@ -677,17 +676,13 @@ def build_export_html(
         "### Checklist (auto)",
         "### Alignment Checklist (Evidence-Based)\nChecked items are derived from the evidence listed above."
     )
-    # Normalize common model formatting issues (prevent run-on lines)
-    align_evidence = re.sub(r"\s+-\s*Alignment claim:", "\n- Alignment claim:", align_evidence)
-    align_evidence = re.sub(r"\s+###\s+", "\n### ", align_evidence)
     evidence_html = f"<div class='evidence'>{esc(align_evidence)}</div>"
 
     def checkbox_line(label: str, checked: bool) -> str:
         box = "☑" if checked else "☐"
         return f"<div class='chk'><span class='box'>{box}</span><span>{esc(label)}</span></div>"
 
-    checks_for_export = alignment_override if alignment_override is not None else align_checks
-    checklist_html = "".join(checkbox_line(k, v) for k, v in checks_for_export.items())
+    checklist_html = "".join(checkbox_line(k, v) for k, v in align_checks.items())
 
     reasons_html = ""
     if align_reasons:
@@ -846,6 +841,42 @@ def make_pdf_bytes(title: str, body_text: str) -> bytes:
 
     c.save()
     return buf.getvalue()
+
+
+
+def _apply_alignment_checks_to_md(md_text: str, checks: dict[str, bool]) -> str:
+    """Apply (human-confirmed) checklist states into the Purpose Alignment section of the markdown draft."""
+    md = (md_text or "")
+    m = re.search(r"(?mi)^\s*##\s+Purpose\s+Alignment\b.*$", md)
+    if not m:
+        return md
+
+    start = m.end()
+    rest = md[start:]
+    end_match = re.search(r"(?mi)^\s*##\s+\S", rest)
+    section = rest[: end_match.start()] if end_match else rest
+    after = rest[end_match.start():] if end_match else ""
+
+    lines = section.splitlines()
+
+    def norm_label(s: str) -> str:
+        return re.sub(r"\s+", " ", s.strip().lower())
+
+    desired = {norm_label(k): bool(v) for k, v in (checks or {}).items()}
+
+    new_lines = []
+    for ln in lines:
+        mm = re.match(r"(?i)^\s*-\s*\[(x| )\]\s*(.+?)\s*$", ln)
+        if mm:
+            label_txt = mm.group(2).strip()
+            key = norm_label(label_txt)
+            if key in desired:
+                mark = "x" if desired[key] else " "
+                new_lines.append(f"- [{mark}] {label_txt}")
+                continue
+        new_lines.append(ln)
+
+    return md[:start] + "\n".join(new_lines) + after
 
 
 def extract_purpose_alignment(md: str) -> tuple[str, dict[str, bool]]:
@@ -1138,29 +1169,28 @@ if st.session_state.page == "draft":
         key="draft_editor",
     )
 
-    # Purpose-alignment indicator (AI-suggested; human-confirmed before export)
-    align_summary, align_checks = extract_purpose_alignment(edited)
+    # Purpose-alignment indicator (for report screenshots)
+    align_align_summary, align_checks, _align_reasons, align_evidence = _extract_alignment_checks(edited)
 
-    # Light cleanup to avoid single-line dumps when the model concatenates claims
-    if align_summary:
-        align_summary = re.sub(r"\s+-\s*Alignment claim:", "\n- Alignment claim:", align_summary)
-        align_summary = re.sub(r"\s+###\s+", "\n### ", align_summary)
-
-    align_checks_user: dict[str, bool] = {}
     with st.expander("Purpose alignment indicator (AI-suggested)", expanded=False):
         st.caption("AI suggests these indicators from the evidence. Please review and adjust before exporting.")
-        if align_summary:
-            st.text(align_summary)
-        st.markdown("**Indicators (editable):**")
-        for label, checked in align_checks.items():
-            key = "align_chk_" + re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")
-            align_checks_user[label] = st.checkbox(label, value=checked, key=key)
+        if align_evidence:
+            st.text_area("Evidence (from draft)", value=align_evidence, height=120, disabled=True)
 
-        evaluator_confirmed = st.checkbox(
-            "I have reviewed and confirm these alignment indicators for export.",
-            value=False,
-            key="align_confirm",
-        )
+        st.markdown("**Indicators (editable):**")
+        if "align_overrides" not in st.session_state:
+            st.session_state["align_overrides"] = dict(align_checks)
+
+        editable_checks = {}
+        for label, suggested in align_checks.items():
+            key = f"align_chk_{re.sub(r'[^a-zA-Z0-9]+', '_', label.lower()).strip('_')}"
+            current = st.session_state["align_overrides"].get(label, suggested)
+            val = st.checkbox(label, value=bool(current), key=key)
+            editable_checks[label] = bool(val)
+
+        st.session_state["align_overrides"] = dict(editable_checks)
+
+    edited_for_export = _apply_alignment_checks_to_md(edited, st.session_state.get("align_overrides", align_checks))
 
     # Build filenames
     ts = time.strftime("%Y%m%d_%H%M%S")
@@ -1170,19 +1200,14 @@ if st.session_state.page == "draft":
 
     st.markdown("---")
     st.subheader("Export")
-st.caption("Please confirm before exporting the final report.")
-export_confirmed = st.checkbox(
-    "I have reviewed and confirm the alignment indicators for export.",
-    value=False,
-)
-st.session_state["export_confirmed"] = export_confirmed
+    st.caption("Please confirm before exporting the final report.")
+    export_confirmed = st.checkbox("I have reviewed and confirm the alignment indicators for export.", value=False)
 
     c1, c2, c3 = st.columns(3)
     with c1:
         st.download_button(
-    disabled=not st.session_state.get("export_confirmed", False),
             "⬇️ Download Markdown",
-            data=edited.encode("utf-8"),
+            data=edited_for_export.encode("utf-8"),
             file_name=md_name,
             mime="text/markdown",
             use_container_width=True,
@@ -1202,10 +1227,11 @@ st.session_state["export_confirmed"] = export_confirmed
             title="Toastmasters Evaluation Draft",
             meeting=meeting,
             selection=selection,
-            draft_md=edited,
+            draft_md=edited_for_export,
         )
         st.download_button(
             "⬇️ Download HTML (print to PDF)",
+            disabled=not export_confirmed,
             data=html_out.encode("utf-8"),
             file_name=html_name,
             mime="text/html",
@@ -1216,6 +1242,7 @@ st.session_state["export_confirmed"] = export_confirmed
         if not pdf_bytes:
             st.download_button(
                 "⬇️ Download PDF",
+                disabled=not export_confirmed,
                 data=b"",
                 file_name=pdf_name,
                 mime="application/pdf",
@@ -1226,6 +1253,7 @@ st.session_state["export_confirmed"] = export_confirmed
         else:
             st.download_button(
                 "⬇️ Download PDF",
+                disabled=not export_confirmed,
                 data=pdf_bytes,
                 file_name=pdf_name,
                 mime="application/pdf",
@@ -1564,7 +1592,7 @@ if st.session_state.page == "draft":
         title="Toastmasters Evaluation Draft",
         meeting=meeting,
         selection=selection,
-        draft_md=edited,
+        draft_md=edited_for_export,
     )
 
     ts = time.strftime("%Y%m%d_%H%M%S")
@@ -1574,7 +1602,7 @@ if st.session_state.page == "draft":
     with c1:
         st.download_button(
             "Download Draft (.md)",
-            data=edited.encode("utf-8"),
+            data=edited_for_export.encode("utf-8"),
             file_name=f"{base}.md",
             mime="text/markdown",
             use_container_width=True,
@@ -1590,7 +1618,7 @@ if st.session_state.page == "draft":
     with c3:
         st.download_button(
             "Download Draft (.txt)",
-            data=edited.encode("utf-8"),
+            data=edited_for_export.encode("utf-8"),
             file_name=f"{base}.txt",
             mime="text/plain",
             use_container_width=True,
