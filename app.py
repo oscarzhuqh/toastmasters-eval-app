@@ -610,7 +610,7 @@ def build_export_html(
     <h2>Appendix: Full Draft (for submission/record)</h2>
     {draft_html}
   </div>
-"""
+        """
 
     sections = _split_md_sections(draft_md or "")
     opening = sections.get("Opening", "").strip()
@@ -637,7 +637,7 @@ def build_export_html(
                 return s
         return default
 
-meeting_rows = "".join(
+    meeting_rows = "".join(
         [
             row("Speaker", get_first(meeting, ["speaker_name","speaker","speakerName","speaker_name_input","speaker_input"])),
             row("Evaluator", get_first(meeting, ["evaluator_name","evaluator","evaluatorName","evaluator_name_input","evaluator_input"])),
