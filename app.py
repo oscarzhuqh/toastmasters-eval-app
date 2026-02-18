@@ -378,39 +378,6 @@ def overall_band(total_score):
     return "Needs Improvement (Below Standard)", "error"
 
 
-PLACEHOLDERS = {"", "-", "–", "—", "n/a", "na", "none", "nil", "null", "no", "nope", "not sure", "unsure", "tbc", "?", "??", "...", "…"}
-
-def is_substantive_text(s: str) -> bool:
-    s = (s or "").strip()
-    if s.lower() in PLACEHOLDERS:
-        return False
-    # require at least 3 alphabetic characters
-    return len(re.findall(r"[A-Za-z]", s)) >= 3
-
-
-
-def strip_code_fences(md: str) -> str:
-    """Remove accidental fenced-code wrappers like ```markdown ... ``` that sometimes appear in LLM output."""
-    if not md:
-        return ""
-    s = md.strip()
-    # Remove a single outer fence if present
-    s = re.sub(r"^```[a-zA-Z0-9_-]*\s*\n", "", s)
-    s = re.sub(r"\n```\s*$", "", s)
-    return s
-
-def remove_alignment_blocks(md: str) -> str:
-    """Remove duplicate checklist/purpose-alignment blocks from the editable draft area."""
-    if not md:
-        return ""
-    s = md
-    # Remove "## Checklist" section
-    s = _remove_h2_section(s, "Checklist")
-    # Remove older "## Purpose Alignment" section (not the evidence-bound one)
-    s = _remove_h2_section(s, "Purpose Alignment")
-    # Also remove any stray checklist lines near the end
-    s = _strip_checklist_lines(s)
-    return s.strip()
 def build_selected_criteria_text(project: str, rubric_items):
     if not is_ice_breaker(project):
         return ""
@@ -426,56 +393,21 @@ def build_selected_criteria_text(project: str, rubric_items):
     return "\n".join(lines)
 
 
-
-def build_export_plaintext(meeting: dict, selection: dict, draft_md: str) -> str:
-    """Plaintext export used for PDF generation (keeps it simple & printable)."""
-    parts = []
-    parts.append("MEETING INFORMATION")
-    parts.append(f"Speaker: {meeting.get('speaker','')}")
-    parts.append(f"Evaluator: {meeting.get('evaluator','')}")
-    parts.append(f"Date: {meeting.get('date','')}")
-    parts.append(f"Speech Title: {meeting.get('speech_title','')}")
-    parts.append("")
-    parts.append("PATHWAYS PROJECT & OBJECTIVES")
-    parts.append(f"Pathway: {selection.get('pathway','')}")
-    parts.append(f"Level: {selection.get('level','')}")
-    parts.append(f"Project: {selection.get('project','')}")
-    parts.append(f"Speech Length: {selection.get('speech_len','')}")
-    parts.append("")
-    parts.append(strip_code_fences(draft_md or "").strip())
-    parts.append("")
-    parts.append("SIGN-OFF")
-    parts.append("Evaluator Signature: _______________________________")
-    parts.append("Date: _______________________________")
-    return "\n".join(parts)
-
 def build_export_html(
     title: str,
     meeting: dict,
     selection: dict,
     draft_md: str,
-    competency: dict = None,
 ) -> str:
     """Create a clean, print-to-PDF-friendly HTML file."""
 
-    safe_md = strip_code_fences(draft_md)
-
-    # Render checklists nicely in HTML (keep it simple and print-friendly)
-    safe_md = safe_md.replace("- [x] ", "☑ ").replace("- [ ] ", "☐ ")
-
+    # Very small markdown -> HTML (safe fallback)
     try:
-        import markdown2  # type: ignore
+        import markdown as md  # type: ignore
 
-        draft_html = markdown2.markdown(
-            safe_md,
-            extras=[
-                "fenced-code-blocks",
-                "tables",
-                "break-on-newline",
-            ],
-        )
+        draft_html = md.markdown(draft_md, extensions=["fenced_code", "tables"])
     except Exception:
-        draft_html = f"<pre style='white-space:pre-wrap'>{html.escape(safe_md)}</pre>"
+        draft_html = f"<pre style='white-space:pre-wrap'>{html.escape(draft_md)}</pre>"
 
     def row(k, v):
         v = "" if v is None else str(v)
@@ -483,109 +415,63 @@ def build_export_html(
 
     meeting_rows = "".join(
         [
-            row("Speaker", meeting.get("speaker", "")),
-            row("Evaluator", meeting.get("evaluator", "")),
-            row("Date", meeting.get("date", "")),
-            row("Speech Title", meeting.get("speech_title", "")),
+            row("Speaker", meeting.get("speaker_name")),
+            row("Evaluator", meeting.get("evaluator_name")),
+            row("Date", meeting.get("meeting_date")),
+            row("Speech Title", meeting.get("speech_title")),
         ]
     )
-
     selection_rows = "".join(
         [
-            row("Pathway", selection.get("pathway", "")),
-            row("Level", selection.get("level", "")),
-            row("Project", selection.get("project", "")),
-            row("Speech Length", selection.get("speech_len", "")),
+            row("Pathway", selection.get("pathway")),
+            row("Level", selection.get("level")),
+            row("Project", selection.get("project")),
+            row("Speech Length", selection.get("speech_len")),
         ]
     )
 
-
-    # Competency summary (optional) for export
-    competency_html = ""
-    if competency:
-        try:
-            total = competency.get("total_score", "")
-            max_s = competency.get("max_score", "")
-            label = competency.get("band_label", "")
-            score_text = f"{total} / {max_s}" if (str(total) != "" and str(max_s) != "") else str(total)
-            competency_html = f"""
-    <div class='box' style='margin-top:12px;'>
-      <h2>Overall Result</h2>
-      <table>
-        <tr><th>Total Score</th><td>{html_escape(score_text)}</td></tr>
-        <tr><th>Competency Level</th><td>{html_escape(str(label))}</td></tr>
-      </table>
-    </div>
-"""
-        except Exception:
-            competency_html = ""
-
-    css = """
-    @page { size: A4; margin: 14mm; }
-    body { font-family: Arial, Helvetica, sans-serif; color: #111; }
-    h1 { margin: 0 0 6px 0; font-size: 22px; }
-    .sub { color: #666; font-size: 12px; margin-bottom: 12px; }
-    .grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 10px; }
-    .box { border: 1px solid #111; padding: 10px; border-radius: 4px; }
-    .box h2 { margin: 0 0 8px 0; font-size: 14px; letter-spacing: .2px; }
-    table { width: 100%; border-collapse: collapse; }
-    th { text-align: left; width: 120px; font-size: 12px; padding: 2px 0; }
-    td { font-size: 12px; padding: 2px 0; }
-    hr { border: 0; border-top: 1px solid #111; margin: 12px 0; }
-    .draft { border: 1px solid #111; padding: 12px; border-radius: 4px; }
-    .draft h2 { margin-top: 14px; }
-    .draft p, .draft li { font-size: 12px; line-height: 1.35; }
-    pre { background: #f6f6f6; padding: 10px; border-radius: 4px; }
-    code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; }
-    """
-
-    html_out = f"""<!doctype html>
-<html>
+    return f"""<!doctype html>
+<html lang=\"en\">
 <head>
-  <meta charset="utf-8" />
+  <meta charset=\"utf-8\" />
+  <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\" />
   <title>{html.escape(title)}</title>
-  <style>{css}</style>
+  <style>
+    body {{ font-family: -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif; margin: 32px; color:#111; }}
+    h1 {{ margin: 0 0 6px 0; font-size: 28px; }}
+    .subtitle {{ color:#555; margin-bottom: 18px; }}
+    .grid {{ display:grid; grid-template-columns: 1fr 1fr; gap: 18px; margin: 18px 0 22px 0; }}
+    .card {{ border:1px solid #e6e6e6; border-radius: 12px; padding: 14px 16px; }}
+    table {{ width:100%; border-collapse: collapse; }}
+    th {{ text-align:left; padding:6px 0; width: 32%; color:#444; font-weight:600; vertical-align: top; }}
+    td {{ padding:6px 0; }}
+    hr {{ border:0; border-top:1px solid #eee; margin: 20px 0; }}
+    .draft {{ line-height: 1.55; }}
+    @media print {{ body {{ margin: 16mm; }} .card {{ break-inside: avoid; }} }}
+  </style>
 </head>
 <body>
   <h1>{html.escape(title)}</h1>
-  <div class="sub">Generated by Toastmasters Evaluation Assistant (T.E.A.)</div>
+  <div class=\"subtitle\">Generated by Toastmasters Evaluation Assistant (T.E.A.)</div>
 
-  <div class="grid">
-    <div class="box">
-      <h2>Meeting Details</h2>
+  <div class=\"grid\">
+    <div class=\"card\">
+      <h2 style=\"margin:0 0 8px 0; font-size:18px\">Meeting Details</h2>
       <table>{meeting_rows}</table>
     </div>
-    <div class="box">
-      <h2>Project Selection</h2>
+    <div class=\"card\">
+      <h2 style=\"margin:0 0 8px 0; font-size:18px\">Project Selection</h2>
       <table>{selection_rows}</table>
     </div>
   </div>
 
   <hr />
-
-  <div class="draft">
-    {draft_html}
-  </div>
-
-  {competency_html}
-  <hr />
-  <div class="grid">
-    <div class="box">
-      <h2>Sign-off</h2>
-      <table>
-        <tr><th>Evaluator Signature</th><td style="height:28px;border-bottom:1px solid #111;"></td></tr>
-        <tr><th>Date</th><td style="height:22px;border-bottom:1px solid #111;"></td></tr>
-      </table>
-    </div>
-    <div class="box">
-      <h2>Notes</h2>
-      <div style="font-size:12px;color:#333;">(Optional) Add any final handwritten notes after printing.</div>
-    </div>
-  </div>
-
+  <h2 style=\"margin:0 0 10px 0\">Evaluation Draft</h2>
+  <div class=\"draft\">{draft_html}</div>
 </body>
 </html>"""
-    return html_out
+
+
 def make_pdf_bytes(title: str, body_text: str) -> bytes:
     """Create a simple A4 PDF (plain text) for download."""
     if canvas is None or A4 is None or cm is None:
@@ -639,66 +525,6 @@ def make_pdf_bytes(title: str, body_text: str) -> bytes:
 
     c.save()
     return buf.getvalue()
-
-
-
-def _remove_h2_section(md: str, heading: str) -> str:
-    """Remove a H2 section (## <heading>) and its body up to the next H2."""
-    if not md:
-        return md
-    m = re.search(rf"^##\s+{re.escape(heading)}\b.*$", md, flags=re.IGNORECASE | re.MULTILINE)
-    if not m:
-        return md
-    start = m.start()
-    after = md[m.end():]
-    m2 = re.search(r"^##\s+\S", after, flags=re.MULTILINE)
-    end = m.end() + (m2.start() if m2 else len(after))
-    return (md[:start] + "\n\n" + md[end:]).strip()
-
-
-def _strip_checklist_lines(block: str) -> str:
-    """Remove markdown checklist bullets from a block (keeps narrative evidence)."""
-    if not block:
-        return block
-    cleaned = []
-    for ln in (block or "").splitlines():
-        if re.match(r"^\s*-\s*\[(x| )\]\s+", ln, flags=re.IGNORECASE):
-            continue
-        # Also drop a duplicated checklist heading if present inside the block
-        if re.match(r"^\s*##\s+Checklist\b", ln, flags=re.IGNORECASE):
-            continue
-        cleaned.append(ln)
-    return "\n".join(cleaned).strip()
-
-
-def split_purpose_alignment_section(md: str) -> tuple[str, str]:
-    """Return (purpose_section_text, remaining_md_without_alignment_or_checklist).
-
-    - Removes '## Purpose Alignment' (any casing) from the main draft so it is displayed separately.
-    - Removes '## Checklist' from the main draft to avoid duplicate/contradicting checklists.
-    """
-    md = (md or "").strip()
-    if not md:
-        return "", ""
-
-    # Extract Purpose Alignment section (if any)
-    purpose_section = ""
-    m = re.search(r"^##\s+Purpose\s+Alignment\b.*$", md, flags=re.IGNORECASE | re.MULTILINE)
-    if m:
-        start = m.start()
-        after = md[m.end():]
-        m2 = re.search(r"^##\s+\S", after, flags=re.MULTILINE)
-        end = m.end() + (m2.start() if m2 else len(after))
-        purpose_section = md[start:end].strip()
-        md = (md[:start] + "\n\n" + md[end:]).strip()
-
-    # Always remove Checklist section from the editable draft
-    md = _remove_h2_section(md, "Checklist")
-
-    # Strip checklist bullets from the evidence block (keep narrative only)
-    purpose_section = _strip_checklist_lines(purpose_section)
-
-    return purpose_section, md
 
 
 def extract_purpose_alignment(md: str) -> tuple[str, dict[str, bool]]:
@@ -942,22 +768,24 @@ if st.session_state.page == "draft_loading":
     else:
         with st.spinner("Running CrewAI…"):
             output = run_crewai_eval(
-                notes=pending.get("notes_payload", ""),
-                pathway=pending.get("pathway", ""),
-                level=pending.get("level", ""),
-                project=pending.get("project", ""),
-                level_focus=pending.get("level_focus", ""),
-                purpose=pending.get("purpose", ""),
-                speech_len=pending.get("speech_len", ""),
-                criteria_text=pending.get("criteria_text", ""),
-                total_score=pending.get("total_score"),
-                score_label=pending.get("score_label", ""),
+                notes=pending.get('notes_payload',''),
+                pathway=pending.get('pathway',''),
+                level=pending.get('level',''),
+                project=pending.get('project',''),
+                level_focus=pending.get('level_focus',''),
+                purpose=pending.get('purpose',''),
+                speech_len=pending.get('speech_len',''),
+                criteria_text=pending.get('criteria_text',''),
+                speaker_name=(pending.get('meeting') or {}).get('speaker') or '',
+                evaluator_name=(pending.get('meeting') or {}).get('evaluator') or '',
+                meeting_date=(pending.get('meeting') or {}).get('date') or None,
+                speech_title=(pending.get('meeting') or {}).get('speech_title') or '',
             )
 
     st.session_state.crewai_output = output
     st.session_state.draft_md = output
 
-    meeting = (pending.get("meeting") or st.session_state.get("meeting") or {})
+    meeting = pending.get("meeting", {})
     selection = {
         "pathway": pending.get("pathway"),
         "level": pending.get("level"),
@@ -969,11 +797,6 @@ if st.session_state.page == "draft_loading":
         meeting=meeting,
         selection=selection,
         draft_md=output,
-        competency={
-            "total_score": st.session_state.get("competency_total_score"),
-            "max_score": st.session_state.get("competency_max_score"),
-            "band_label": st.session_state.get("competency_band_label"),
-        },
     )
 
     st.session_state.page = "draft"
@@ -986,69 +809,21 @@ if st.session_state.page == "draft":
     render_step_indicator()
 
     st.subheader("Evaluation draft (editable)")
-
-    full_md_raw = st.session_state.get("draft_md") or ""
-    # Remove accidental fenced code wrappers like ```markdown ... ```
-    full_md = strip_code_fences(full_md_raw)
-
-    purpose_section, main_md = split_purpose_alignment_section(full_md)
-
-    # Remove duplicate checklist / purpose-alignment blocks from the editable draft area
-    main_md_clean = remove_alignment_blocks(main_md)
-
-    edited_main = st.text_area(
+    draft_default = st.session_state.get("draft_md") or ""
+    edited = st.text_area(
         "You can edit the draft below before exporting:",
-        value=main_md_clean,
+        value=draft_default,
         height=520,
         key="draft_editor",
     )
 
-    # Purpose-alignment indicator (shown below the draft, not embedded inside it)
-    with st.expander("Purpose alignment indicator (AI-suggested)", expanded=False):
-        evidence_text = strip_code_fences(purpose_section).strip()
-        if evidence_text:
-            st.text_area(
-                "Evidence (from draft)",
-                value=evidence_text,
-                height=240,
-                key="purpose_alignment_evidence",
-            )
-        else:
-            st.info("No purpose alignment section found in the draft.")
-
-        # Suggested indicators derived from the generated draft (AI-suggested)
-        align_summary, align_checks = extract_purpose_alignment(full_md)
+    # Purpose-alignment indicator (for report screenshots)
+    align_summary, align_checks = extract_purpose_alignment(edited)
+    with st.expander("Purpose alignment indicator (auto)", expanded=False):
         if align_summary:
             st.caption(align_summary)
-
-        st.markdown("**Indicators (editable):**")
-
-        # Persist evaluator decisions (editable, NOT disabled)
-        if "align_overrides" not in st.session_state:
-            st.session_state["align_overrides"] = dict(align_checks)
-
-        editable = {}
-        for label, suggested in align_checks.items():
-            key = f"align_chk_{re.sub(r'[^a-zA-Z0-9]+', '_', label.lower()).strip('_')}"
-            current = st.session_state["align_overrides"].get(label, suggested)
-            editable[label] = bool(st.checkbox(label, value=bool(current), key=key))
-        st.session_state["align_overrides"] = dict(editable)
-
-    # ---------- Rebuild combined markdown for export ----------
-    evidence_for_export = strip_code_fences(st.session_state.get("purpose_alignment_evidence", purpose_section)).strip()
-    combined_md = (edited_main.strip() + ("\n\n" + evidence_for_export if evidence_for_export else "")).strip()
-
-    # Append a single evaluator-controlled checklist (export only)
-    final_checks = st.session_state.get("align_overrides", {})
-    checklist_lines = [
-        "## Evaluator Alignment Checklist",
-        "- [x] Purpose clearly addressed" if final_checks.get("Purpose clearly addressed") else "- [ ] Purpose clearly addressed",
-        "- [x] Level focus demonstrated" if final_checks.get("Level focus demonstrated") else "- [ ] Level focus demonstrated",
-        "- [x] Feedback linked to evaluation criteria" if final_checks.get("Feedback linked to evaluation criteria") else "- [ ] Feedback linked to evaluation criteria",
-        "- [x] Balanced commendations + improvements" if final_checks.get("Balanced commendations + improvements") else "- [ ] Balanced commendations + improvements",
-        "- [x] Actionable next step provided" if final_checks.get("Actionable next step provided") else "- [ ] Actionable next step provided",
-    ]
-    combined_md = (combined_md + "\n\n" + "\n".join(checklist_lines)).strip()
+        for label, checked in align_checks.items():
+            st.checkbox(label, value=checked, disabled=True)
 
     # Build filenames
     ts = time.strftime("%Y%m%d_%H%M%S")
@@ -1056,26 +831,20 @@ if st.session_state.page == "draft":
     html_name = f"tea_evaluation_draft_{ts}.html"
     pdf_name = f"tea_evaluation_draft_{ts}.pdf"
 
-    # Export buttons
     st.markdown("---")
     st.subheader("Export")
-    ack = st.checkbox(
-        "I have reviewed the draft and confirm it reflects my evaluation before exporting.",
-        key="ack_review"
-    )
-
     c1, c2, c3 = st.columns(3)
     with c1:
         st.download_button(
             "⬇️ Download Markdown",
-            data=combined_md.encode("utf-8"),
+            data=edited.encode("utf-8"),
             file_name=md_name,
             mime="text/markdown",
             use_container_width=True,
         )
-
     with c2:
-        meeting = ((st.session_state.get("pending_generation") or {}).get("meeting") or st.session_state.get("meeting") or {})
+        # Rebuild HTML using the edited version (for PDF-print friendly output)
+        meeting = (st.session_state.get("pending_generation") or {}).get("meeting", {})
         selection = {
             "pathway": (st.session_state.get("pending_generation") or {}).get("pathway"),
             "level": (st.session_state.get("pending_generation") or {}).get("level"),
@@ -1086,20 +855,17 @@ if st.session_state.page == "draft":
             title="Toastmasters Evaluation Draft",
             meeting=meeting,
             selection=selection,
-            draft_md=combined_md,
+            draft_md=edited,
         )
         st.download_button(
             "⬇️ Download HTML (print to PDF)",
             data=html_out.encode("utf-8"),
             file_name=html_name,
             mime="text/html",
-            disabled=not ack,
             use_container_width=True,
         )
-
     with c3:
-        pdf_source = build_export_plaintext(meeting, selection, combined_md)
-        pdf_bytes = make_pdf_bytes("Toastmasters Evaluation Draft", pdf_source)
+        pdf_bytes = make_pdf_bytes("Toastmasters Evaluation Draft", edited)
         if not pdf_bytes:
             st.download_button(
                 "⬇️ Download PDF",
@@ -1116,12 +882,13 @@ if st.session_state.page == "draft":
                 data=pdf_bytes,
                 file_name=pdf_name,
                 mime="application/pdf",
-                disabled=not ack,
                 use_container_width=True,
             )
 
+
     st.caption(
-        "PDF tip: you can download PDF directly, or open the downloaded HTML in Chrome/Edge, then use Print → Save as PDF."
+        "PDF tip: you can download PDF directly, or open the downloaded HTML in Chrome/Edge, then use Print → Save as PDF. "
+        "(This keeps formatting cleaner than copying from the app.)"
     )
 
     st.markdown("---")
@@ -1134,8 +901,8 @@ if st.session_state.page == "draft":
         if st.button("🏠 Start Over"):
             st.session_state.page = "select"
             st.rerun()
-
     st.stop()
+
 
 # ==================== PAGE 2: LOADING ====================
 if st.session_state.page == "loading":
@@ -1242,15 +1009,6 @@ if st.session_state.page == "evaluation":
     total_score = compute_total_score(rubric_items)
     max_score = len(rubric_items) * 5
 
-    # Persist competency info for export (HTML/PDF)
-    try:
-        band_label, _band_color = overall_band(total_score)
-    except Exception:
-        band_label, _band_color = ("", "")
-    st.session_state["competency_total_score"] = total_score
-    st.session_state["competency_max_score"] = max_score
-    st.session_state["competency_band_label"] = band_label
-
     st.subheader("Speaker's Competency Total Accumulated Score")
     cA, cB = st.columns([1.2, 2.8], vertical_alignment="center")
     with cA:
@@ -1306,82 +1064,62 @@ if st.session_state.page == "evaluation":
 
     selected_criteria_text = build_selected_criteria_text(d["project"], rubric_items)
 
-    
-    rubric_comments_lines = []
-    for item in rubric_items:
-        cmt = (item.get("comment") or "").strip()
-        if is_substantive_text(cmt):
-            rubric_comments_lines.append(f"- {item['name']} ({int(item['rating'])}/5): {cmt}")
-    rubric_comments_text = "\n".join(rubric_comments_lines)
-    
     notes_payload = f"""
-    Meeting details:
-    - Speaker: {meeting.get("speaker") or "N/A"}
-    - Evaluator: {meeting.get("evaluator") or "N/A"}
-    - Date: {meeting_date_str}
-    - Speech title: {meeting.get('speech_title') or 'N/A'}
-    
-    Selected project context:
-    - Pathway: {d["pathway"]}
-    - Level: {d["level"]}
-    - Project: {d["project"]}
-    - Speech length: {d["speech_len"]}
-    
-    Level focus:
-    {d["level_focus"]}
-    
-    Purpose:
-    {d["purpose"]}
-    
-    Total score:
-    - {total_score}/{max_score} ({label})
-    
-    {selected_criteria_text}
-    
-    Rubric comments (verbatim):
-    {rubric_comments_text if rubric_comments_text else '(None provided)'}
-    
-    Rubric summary (auto):
-    Strengths (ratings 4–5):
-    {strengths_text}
-    
-    Areas for improvement (ratings 1–3):
-    {improvements_text}
-    
-    General comments:
-    You excelled at:
-    {excelled}
-    
-    You may want to work on:
-    {work_on}
-    
-    To challenge yourself:
-    {challenge}
-    """.strip()
+Meeting details:
+- Speaker: {meeting.get("speaker") or "N/A"}
+- Evaluator: {meeting.get("evaluator") or "N/A"}
+- Date: {meeting_date_str}
+- Speech title: {meeting.get('speech_title') or 'N/A'}
+
+Selected project context:
+- Pathway: {d["pathway"]}
+- Level: {d["level"]}
+- Project: {d["project"]}
+- Speech length: {d["speech_len"]}
+
+Level focus:
+{d["level_focus"]}
+
+Purpose:
+{d["purpose"]}
+
+Total score:
+- {total_score}/{max_score} ({label})
+
+{selected_criteria_text}
+
+Rubric summary (auto):
+Strengths (ratings 4–5):
+{strengths_text}
+
+Areas for improvement (ratings 1–3):
+{improvements_text}
+
+General comments:
+You excelled at:
+{excelled}
+
+You may want to work on:
+{work_on}
+
+To challenge yourself:
+{challenge}
+""".strip()
 
     if st.button("Generate Evaluation Draft (CrewAI)"):
         if run_crewai_eval is None:
             st.error("CrewAI module failed to import.")
             st.code(CREWAI_IMPORT_ERROR)
         else:
-            # Allow generation if the user typed *anything* (even placeholders like "n/a"),
-            # but treat placeholders as non-evidence for alignment guardrails downstream.
-            has_any_general_input = bool((excelled or "").strip() or (work_on or "").strip() or (challenge or "").strip())
-            has_any_rubric_comment = any(bool(((x.get("comment") or "")).strip()) for x in rubric_items)
-
-            has_substantive_general = (is_substantive_text(excelled) or is_substantive_text(work_on) or is_substantive_text(challenge))
-            has_substantive_rubric = any(is_substantive_text((x.get("comment") or "")) for x in rubric_items)
-
-            if not has_any_general_input and not has_any_rubric_comment:
+            has_general = (excelled.strip() or work_on.strip() or challenge.strip())
+            has_any_rubric_comment = any((x.get("comment") or "").strip() for x in rubric_items)
+            if not has_general and not has_any_rubric_comment:
                 st.warning("Please add at least one rubric comment OR fill one general comment box before generating.")
             else:
-                if not has_substantive_general and not has_substantive_rubric:
-                    st.info("No substantive evaluator evidence detected (placeholders only). Alignment indicators will be conservatively withheld for Appendix B6.")
                 # Save payload and navigate to a fresh Draft page.
                 # Everything Step 4 needs (use `.get()` when reading to avoid KeyError)
                 st.session_state.pending_generation = {
                     "notes_payload": notes_payload,
-                    "meeting": (st.session_state.get("meeting") or {}).copy(),
                     "pathway": d.get("pathway", ""),
                     "level": d.get("level", ""),
                     "project": d.get("project", ""),
@@ -1429,13 +1167,18 @@ if st.session_state.page == "draft_loading":
     else:
         with st.spinner("Running CrewAI…"):
             output = run_crewai_eval(
-                notes=pending.get("notes_payload", ""),
-                pathway=pending.get("pathway", ""),
-                level=pending.get("level", ""),
-                project=pending.get("project", ""),
-                level_focus=pending.get("level_focus", ""),
-                purpose=pending.get("purpose", ""),
-                speech_len=pending.get("speech_len", ""),
+                notes=pending.get('notes_payload',''),
+                pathway=pending.get('pathway',''),
+                level=pending.get('level',''),
+                project=pending.get('project',''),
+                level_focus=pending.get('level_focus',''),
+                purpose=pending.get('purpose',''),
+                speech_len=pending.get('speech_len',''),
+                criteria_text=pending.get('criteria_text',''),
+                speaker_name=(pending.get('meeting') or {}).get('speaker') or '',
+                evaluator_name=(pending.get('meeting') or {}).get('evaluator') or '',
+                meeting_date=(pending.get('meeting') or {}).get('date') or None,
+                speech_title=(pending.get('meeting') or {}).get('speech_title') or '',
             )
 
     st.session_state.crewai_output = output
@@ -1478,7 +1221,7 @@ if st.session_state.page == "draft":
         title="Toastmasters Evaluation Draft",
         meeting=meeting,
         selection=selection,
-        draft_md=combined_md,
+        draft_md=edited,
     )
 
     ts = time.strftime("%Y%m%d_%H%M%S")
@@ -1488,7 +1231,7 @@ if st.session_state.page == "draft":
     with c1:
         st.download_button(
             "Download Draft (.md)",
-            data=combined_md.encode("utf-8"),
+            data=edited.encode("utf-8"),
             file_name=f"{base}.md",
             mime="text/markdown",
             use_container_width=True,
@@ -1499,13 +1242,12 @@ if st.session_state.page == "draft":
             data=html_doc.encode("utf-8"),
             file_name=f"{base}.html",
             mime="text/html",
-            disabled=not ack,
             use_container_width=True,
         )
     with c3:
         st.download_button(
             "Download Draft (.txt)",
-            data=combined_md.encode("utf-8"),
+            data=edited.encode("utf-8"),
             file_name=f"{base}.txt",
             mime="text/plain",
             use_container_width=True,
@@ -1538,3 +1280,4 @@ if st.session_state.page == "draft":
                     del st.session_state[k]
             st.session_state.page = "select"
             st.rerun()
+
