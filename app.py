@@ -536,6 +536,27 @@ def make_pdf_bytes(title: str, body_text: str) -> bytes:
     return buf.getvalue()
 
 
+
+def split_purpose_alignment_section(md: str) -> tuple[str, str]:
+    """Return (purpose_section_text, remaining_md_without_section).
+
+    Looks for a '## Purpose Alignment' section and removes it from the main draft so it can be displayed separately (B5-style).
+    If not found, returns ("", md).
+    """
+    md = md or ""
+    m = re.search(r"^##\s+Purpose\s+Alignment\b.*$", md, flags=re.IGNORECASE | re.MULTILINE)
+    if not m:
+        return "", md
+    start = m.start()
+    after = md[m.end():]
+    # Capture until next H2
+    m2 = re.search(r"^##\s+\S", after, flags=re.MULTILINE)
+    end = m.end() + (m2.start() if m2 else len(after))
+    section = md[start:end].strip()
+    remaining = (md[:start] + "\n\n" + md[end:]).strip()
+    return section, remaining
+
+
 def extract_purpose_alignment(md: str) -> tuple[str, dict[str, bool]]:
     """Extract a Purpose Alignment summary + checkbox checklist from the draft markdown.
 
@@ -816,21 +837,40 @@ if st.session_state.page == "draft":
     render_step_indicator()
 
     st.subheader("Evaluation draft (editable)")
-    draft_default = st.session_state.get("draft_md") or ""
-    edited = st.text_area(
+
+    full_md = st.session_state.get("draft_md") or ""
+    purpose_section, main_md = split_purpose_alignment_section(full_md)
+
+    edited_main = st.text_area(
         "You can edit the draft below before exporting:",
-        value=draft_default,
+        value=main_md,
         height=520,
         key="draft_editor",
     )
 
-    # Purpose-alignment indicator (for report screenshots)
-    align_summary, align_checks = extract_purpose_alignment(edited)
-    with st.expander("Purpose alignment indicator (auto)", expanded=False):
+    # Purpose-alignment indicator (B5-style: shown below the draft, not embedded inside it)
+    with st.expander("Purpose alignment indicator (AI-suggested)", expanded=False):
+        if purpose_section:
+            st.text_area(
+                "Evidence (from draft)",
+                value=purpose_section,
+                height=240,
+                key="purpose_alignment_evidence",
+            )
+        else:
+            st.info("No purpose alignment section found in the draft.")
+
+        # Auto-indicators (read-only snapshot for Appendix screenshots)
+        combined_for_checks = (edited_main.strip() + "\n\n" + purpose_section.strip()).strip()
+        align_summary, align_checks = extract_purpose_alignment(combined_for_checks)
         if align_summary:
             st.caption(align_summary)
         for label, checked in align_checks.items():
             st.checkbox(label, value=checked, disabled=True)
+
+    # Rebuild combined markdown for export
+    purpose_for_export = st.session_state.get("purpose_alignment_evidence", purpose_section).strip()
+    combined_md = (edited_main.strip() + ("\n\n" + purpose_for_export if purpose_for_export else "")).strip()
 
     # Build filenames
     ts = time.strftime("%Y%m%d_%H%M%S")
@@ -840,11 +880,12 @@ if st.session_state.page == "draft":
 
     st.markdown("---")
     st.subheader("Export")
+    ack = st.checkbox("I have reviewed the draft and confirm it reflects my evaluation before exporting.", key="ack_review")
     c1, c2, c3 = st.columns(3)
     with c1:
         st.download_button(
             "⬇️ Download Markdown",
-            data=edited.encode("utf-8"),
+            data=combined_md.encode("utf-8"),
             file_name=md_name,
             mime="text/markdown",
             use_container_width=True,
@@ -862,17 +903,18 @@ if st.session_state.page == "draft":
             title="Toastmasters Evaluation Draft",
             meeting=meeting,
             selection=selection,
-            draft_md=edited,
+            draft_md=combined_md,
         )
         st.download_button(
             "⬇️ Download HTML (print to PDF)",
             data=html_out.encode("utf-8"),
             file_name=html_name,
             mime="text/html",
+            disabled=not ack,
             use_container_width=True,
         )
     with c3:
-        pdf_bytes = make_pdf_bytes("Toastmasters Evaluation Draft", edited)
+        pdf_bytes = make_pdf_bytes("Toastmasters Evaluation Draft", combined_md)
         if not pdf_bytes:
             st.download_button(
                 "⬇️ Download PDF",
@@ -889,6 +931,7 @@ if st.session_state.page == "draft":
                 data=pdf_bytes,
                 file_name=pdf_name,
                 mime="application/pdf",
+                disabled=not ack,
                 use_container_width=True,
             )
 
@@ -1242,7 +1285,7 @@ if st.session_state.page == "draft":
         title="Toastmasters Evaluation Draft",
         meeting=meeting,
         selection=selection,
-        draft_md=edited,
+        draft_md=combined_md,
     )
 
     ts = time.strftime("%Y%m%d_%H%M%S")
@@ -1252,7 +1295,7 @@ if st.session_state.page == "draft":
     with c1:
         st.download_button(
             "Download Draft (.md)",
-            data=edited.encode("utf-8"),
+            data=combined_md.encode("utf-8"),
             file_name=f"{base}.md",
             mime="text/markdown",
             use_container_width=True,
@@ -1263,12 +1306,13 @@ if st.session_state.page == "draft":
             data=html_doc.encode("utf-8"),
             file_name=f"{base}.html",
             mime="text/html",
+            disabled=not ack,
             use_container_width=True,
         )
     with c3:
         st.download_button(
             "Download Draft (.txt)",
-            data=edited.encode("utf-8"),
+            data=combined_md.encode("utf-8"),
             file_name=f"{base}.txt",
             mime="text/plain",
             use_container_width=True,
