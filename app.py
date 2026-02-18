@@ -449,6 +449,40 @@ def build_export_plaintext(meeting: dict, selection: dict, draft_md: str) -> str
     parts.append("Date: _______________________________")
     return "\n".join(parts)
 
+
+def strip_alignment_checklist(md: str) -> str:
+    """Remove any 'Evaluator Alignment Checklist' section (checkboxes) from exported markdown."""
+    if not md:
+        return md
+    lines = md.splitlines()
+    out = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.strip().lower().startswith("## evaluator alignment checklist") or line.strip().lower().startswith("### evaluator alignment checklist"):
+            # skip this heading and subsequent checkbox lines
+            i += 1
+            while i < len(lines):
+                l = lines[i].strip()
+                if l == "":
+                    # keep one blank line and stop skipping
+                    out.append("")
+                    break
+                # typical checkbox markdown patterns
+                if l.startswith("- [") or l.startswith("[") or l.startswith("□") or l.startswith("☐") or l.startswith("- ☐") or l.startswith("- ☑"):
+                    i += 1
+                    continue
+                # stop if we hit another heading
+                if l.startswith("#"):
+                    i -= 1
+                    break
+                i += 1
+            i += 1
+            continue
+        out.append(line)
+        i += 1
+    return "\n".join(out).strip() + "\n"
+
 def build_export_html(
     title: str,
     meeting: dict,
@@ -457,6 +491,8 @@ def build_export_html(
     competency: dict = None,
 ) -> str:
     """Create a clean, print-to-PDF-friendly HTML file."""
+
+    draft_md = strip_alignment_checklist(draft_md)
 
     safe_md = strip_code_fences(draft_md)
 
@@ -1038,17 +1074,7 @@ if st.session_state.page == "draft":
     evidence_for_export = strip_code_fences(st.session_state.get("purpose_alignment_evidence", purpose_section)).strip()
     combined_md = (edited_main.strip() + ("\n\n" + evidence_for_export if evidence_for_export else "")).strip()
 
-    # Append a single evaluator-controlled checklist (export only)
-    final_checks = st.session_state.get("align_overrides", {})
-    checklist_lines = [
-        "## Evaluator Alignment Checklist",
-        "- [x] Purpose clearly addressed" if final_checks.get("Purpose clearly addressed") else "- [ ] Purpose clearly addressed",
-        "- [x] Level focus demonstrated" if final_checks.get("Level focus demonstrated") else "- [ ] Level focus demonstrated",
-        "- [x] Feedback linked to evaluation criteria" if final_checks.get("Feedback linked to evaluation criteria") else "- [ ] Feedback linked to evaluation criteria",
-        "- [x] Balanced commendations + improvements" if final_checks.get("Balanced commendations + improvements") else "- [ ] Balanced commendations + improvements",
-        "- [x] Actionable next step provided" if final_checks.get("Actionable next step provided") else "- [ ] Actionable next step provided",
-    ]
-    combined_md = (combined_md + "\n\n" + "\n".join(checklist_lines)).strip()
+    # (Export) Evaluator alignment checklist removed to keep PDF to one page.
 
     # Build filenames
     ts = time.strftime("%Y%m%d_%H%M%S")
