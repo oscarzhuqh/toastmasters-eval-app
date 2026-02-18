@@ -1,10 +1,9 @@
 """CrewAI evaluation generator for Toastmasters Evaluation Assistant (T.E.A.).
 
-Submission version features:
-- Robust generation: uses CrewAI when available; falls back to a single LLM call.
-- Meeting-ready structure: Markdown with clear headings that map to the export form layout.
-- Anti-hallucination Purpose Alignment: evidence-bound claims + "Insufficient evidence..." fallback.
-- Includes "Rubric Snapshot" so rubric ratings/comments appear in exports.
+Designed to be robust:
+- Reads API key/model from env vars or Streamlit secrets.
+- Attempts to use CrewAI.
+- If CrewAI isn't available or fails due to version mismatches, falls back to a single LLM call.
 
 App expects:
     from crewai_eval import run_crewai_eval
@@ -13,13 +12,15 @@ App expects:
 from __future__ import annotations
 
 import os
-import re
+import traceback
 from typing import Optional
 
 
 def _get_setting(key: str, default: str = "") -> str:
     """Read from Streamlit secrets first (if available), else env."""
     value = ""
+
+    # Streamlit secrets (works on Streamlit Cloud and locally with .streamlit/secrets.toml)
     try:
         import streamlit as st  # type: ignore
 
@@ -41,12 +42,13 @@ def _fallback_llm(prompt: str, api_key: str, model: str) -> str:
 
         client = OpenAI(api_key=api_key)
 
-        # Prefer Responses API if available
+        # Newer SDKs: Responses API
         try:
             resp = client.responses.create(
                 model=model,
                 input=prompt,
             )
+            # `output_text` is a convenience on newer SDKs
             text = getattr(resp, "output_text", None)
             if text:
                 return str(text).strip()
@@ -56,7 +58,10 @@ def _fallback_llm(prompt: str, api_key: str, model: str) -> str:
             chat = client.chat.completions.create(
                 model=model,
                 messages=[
-                    {"role": "system", "content": "You are a Toastmasters speech evaluation assistant."},
+                    {
+                        "role": "system",
+                        "content": "You are a Toastmasters speech evaluation assistant.",
+                    },
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.4,
@@ -69,34 +74,6 @@ def _fallback_llm(prompt: str, api_key: str, model: str) -> str:
             f"Fallback error: {e}\n\n"
             "Tip: Ensure OPENAI_API_KEY is set in Streamlit secrets or environment variables."
         )
-
-
-def purpose_alignment_summary(md_text: str) -> str:
-    """Extract a short 1–2 sentence summary from the Purpose Alignment section (if present)."""
-    md = (md_text or "").strip()
-    if not md:
-        return ""
-
-    m = re.search(r"^#{1,3}\s+Purpose\s+Alignment.*$", md, flags=re.IGNORECASE | re.MULTILINE)
-    if not m:
-        return ""
-
-    section = md[m.end():]
-    section = re.split(r"^#{1,3}\s+", section, maxsplit=1, flags=re.MULTILINE)[0].strip()
-    lines = [ln.strip() for ln in section.splitlines() if ln.strip()]
-
-    out = []
-    for ln in lines:
-        if re.match(r"^-\s*\[(x| )\]\s+", ln, flags=re.IGNORECASE):
-            break
-        if ln.lower().startswith("evidence:"):
-            continue
-        if ln.startswith("-") and not ln.lower().startswith("- alignment claim"):
-            continue
-        out.append(ln)
-        if len(out) >= 2:
-            break
-    return " ".join(out).strip()
 
 
 def run_crewai_eval(
@@ -113,40 +90,37 @@ def run_crewai_eval(
     evaluator_name: str = "",
     meeting_date: str = "",
     speech_title: str = "",
-    total_score: Optional[int] = None,
-    score_band: str = "",
-    **_ignored: object,
 ) -> str:
-    """Generate an evaluation draft (Markdown). Extra kwargs are accepted for forward compatibility."""
+    """Generate an editable evaluation draft.
+
+    Returns a single markdown string.
+    """
+
     api_key = _get_setting("OPENAI_API_KEY", "")
     model = _get_setting("OPENAI_MODEL", "gpt-4o-mini")
 
     if not api_key:
         return (
             "❌ Missing OPENAI_API_KEY.\n\n"
-            "Add it in Streamlit secrets (recommended) or environment variables.\n"
+            "Add it in Streamlit secrets (recommended):\n"
+            "- Streamlit Cloud: App → Settings → Secrets\n"
+            "- Local: create .streamlit/secrets.toml\n\n"
             "Example secrets.toml:\n"
             "OPENAI_API_KEY = \"sk-...\"\n"
             "OPENAI_MODEL = \"gpt-4o-mini\"\n"
         )
 
-    score_line = ""
-    if total_score is not None:
-        score_line = f"- Total competency score (rubric): {total_score}" + (f" ({score_band})" if score_band else "")
-
     prompt = f"""
 You are the Toastmasters Evaluation Assistant (T.E.A.).
 
 Goal:
-Turn the evaluator's rubric ratings + rough notes into a clear, kind, and project-aligned evaluation draft
-suitable for a real Toastmasters club meeting.
+Turn the evaluator's rubric ratings + rough notes into a clear, kind, and project-aligned evaluation draft.
 
 Meeting details:
 - Speaker: {speaker_name or "(not provided)"}
 - Evaluator: {evaluator_name or "(not provided)"}
 - Date: {meeting_date or "(not provided)"}
 - Speech Title: {speech_title or "(not provided)"}
-{score_line}
 
 Pathways context:
 - Pathway: {pathway}
@@ -154,9 +128,9 @@ Pathways context:
 - Project: {project}
 - Project Purpose: {purpose}
 - Level Focus: {level_focus}
-- Target speech length: {speech_len}
+- Speech length target: {speech_len}
 
-Evaluation criteria reference (rubric meaning):
+Evaluation criteria reference (for the evaluator to stay consistent):
 {criteria_text.strip() or "(No criteria text provided)"}
 
 Evaluator input (rubric summary + comments + general notes):
@@ -164,67 +138,32 @@ Evaluator input (rubric summary + comments + general notes):
 
 Write the output as a structured evaluation draft in plain English.
 
-Required structure (use Markdown headings exactly):
+Required structure:
+1) **Opening** (1–2 sentences) that references the selected project purpose.
+2) **Rubric Snapshot (1–5)**: list *every* criterion with rating and (if provided) evaluator comment in this exact format:
+   - <Criterion>: <rating>/5 — <short comment or "No comment">
+3) **Strengths (4–5)**: bullets that reference specific criteria and ratings (e.g., "Clarity (4/5)…").
+4) **Areas for Improvement (1–3)**: bullets that reference specific criteria and ratings.
+5) **One Challenge**: one actionable next step (1–2 sentences).
+6) **Purpose Alignment (Evidence-Bound)**:
+   - Alignment claim: <one sentence>
+   - Evidence: <quote or paraphrase from evaluator notes/rubric comment>
+   - Alignment claim: <one sentence>
+   - Evidence: <quote or paraphrase from evaluator notes/rubric comment>
+   (Include 2–3 claim/evidence pairs. If evidence is insufficient, write exactly: "Insufficient evidence: no Evidence lines were provided in the evaluator inputs.")
+7) **Evaluator Alignment Checklist** (NOT auto-ticked): output as plain text checklist:
+   - [ ] Purpose clearly addressed
+   - [ ] Level focus demonstrated
+   - [ ] Feedback linked to evaluation criteria
+   - [ ] Balanced commendations + improvements
+   - [ ] Actionable next step provided
 
-## Opening
-Write 2–3 sentences (~40–70 words). The opening should:
-- Thank the speaker and mention the speech title
-- Clearly link back to the project purpose
-- Use a warm, encouraging Toastmasters tone
 
-## Strengths
-Write 3–5 bullet points. Each bullet should be ~20–30 words and should:
-- State one clear strength
-- Include a brief explanation or example from the notes
-- Link back to evaluation criteria where possible
-
-## Rubric Snapshot
-- Include a compact list of the rubric items as provided (criterion, rating/5, and the evaluator's short comment if any).
-- Do NOT invent comments. If a comment is missing, write "(no comment)".
-
-## Recommendations
-Write 3–5 bullet points (~18–28 words each). Each bullet should:
-- State one improvement area
-- Include a brief explanation or example from the notes
-- Link back to evaluation criteria where possible
-
-## One Challenge
-Write 1–2 sentences (~25–45 words). Make it very actionable and phrased as the next step.
-
-## Purpose Alignment
-Write an evidence-based alignment summary. You may ONLY make alignment claims that are directly supported by:
-(a) the stated Project Purpose
-(b) the stated Level Focus
-(c) the evaluator’s rubric ratings/comments
-(d) the evaluator’s general comments
-
-Do not restate the project purpose verbatim unless it is used as Evidence.
-
-For each claim, you MUST include an Evidence line quoting or paraphrasing from the provided notes.
-If there is insufficient evidence, write: "Insufficient evidence in the provided notes to confirm this."
-
-Format exactly:
-### Evidence-backed alignment
-- Alignment claim: <short claim>
-  Evidence: <quote/paraphrase from Purpose/Level Focus/Rubric/Comments OR the insufficient-evidence sentence>
-
-(Write 2–3 claim/evidence pairs.)
-
-### Evaluator Alignment Checklist (Guardrails Implementation)
-- [ ] Purpose clearly addressed
-- [ ] Level focus demonstrated
-- [ ] Feedback linked to evaluation criteria
-- [ ] Balanced commendations + improvements
-- [ ] Actionable next step provided
-
-### Why (2–3 bullets)
-- <bullet explaining which evidence supports checked items and what is missing if unchecked>
 
 Rules:
-- Reuse rubric comments explicitly: reference the evaluator's rubric notes and ratings (paraphrase or short quotes) instead of generic statements.
-- Be specific, but do not invent details.
+- Be specific (use examples where available), but do not invent details.
 - If details are missing, use "Based on the notes provided..." and keep it general.
-- Tone: supportive, respectful, Toastmasters-appropriate.
+- Keep tone supportive and Toastmasters-appropriate.
 - Output Markdown only.
 """.strip()
 
@@ -232,9 +171,11 @@ Rules:
     try:
         from crewai import Agent, Task, Crew, Process  # type: ignore
 
+        # Some CrewAI versions provide an LLM helper. We'll try it, but degrade gracefully.
         llm = None
         try:
             from crewai import LLM  # type: ignore
+
             llm = LLM(model=model, api_key=api_key)
         except Exception:
             llm = None
@@ -243,14 +184,14 @@ Rules:
             role="Speech Evaluator",
             goal="Write a clear, supportive Toastmasters evaluation draft aligned to Pathways project goals.",
             backstory="You are a seasoned Toastmasters evaluator who focuses on actionable feedback.",
-            llm=llm,
+            llm=llm,  # if None, CrewAI may still read env vars
             verbose=False,
         )
 
         alignment = Agent(
             role="Alignment Checker",
-            goal="Ensure the draft follows the required headings and the Purpose Alignment section is evidence-bound.",
-            backstory="You ensure evaluations are objective, rubric-aligned, and project-relevant with audit-ready evidence.",
+            goal="Ensure the draft explicitly aligns to Project Purpose and Level Focus.",
+            backstory="You ensure evaluations are objective, rubric-aligned, and project-relevant.",
             llm=llm,
             verbose=False,
         )
@@ -263,10 +204,8 @@ Rules:
 
         check_task = Task(
             description=(
-                "Review the evaluation draft. Ensure headings match exactly: "
-                "Opening, Strengths, Rubric Snapshot, Recommendations, One Challenge, Purpose Alignment. "
-                "Ensure Purpose Alignment uses the Evidence-backed format with Evidence lines. "
-                "Repair any missing checklist items. Keep Markdown only."
+                "Review the evaluation draft and add/repair the 'Alignment check' section so it clearly "
+                "links to Project Purpose + Level focus. Keep everything concise and Markdown only."
             ),
             expected_output="The improved final markdown draft.",
             agent=alignment,
@@ -281,9 +220,10 @@ Rules:
         )
 
         result = crew.kickoff()
-
+        # CrewAI may return a string or an object
         if isinstance(result, str):
             return result.strip()
+        # common attributes
         for attr in ("raw", "output", "final_output"):
             if hasattr(result, attr):
                 value = getattr(result, attr)
@@ -292,6 +232,7 @@ Rules:
         return str(result).strip()
 
     except Exception:
+        # --- Fallback ---
         return (
             _fallback_llm(prompt, api_key=api_key, model=model)
             + "\n\n---\n"
