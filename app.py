@@ -1072,57 +1072,57 @@ if st.session_state.page == "evaluation":
     selected_criteria_text = build_selected_criteria_text(d["project"], rubric_items)
 
     
-rubric_comments_lines = []
-for item in rubric_items:
-    cmt = (item.get("comment") or "").strip()
-    if is_substantive_text(cmt):
-        rubric_comments_lines.append(f"- {item['name']} ({int(item['rating'])}/5): {cmt}")
-rubric_comments_text = "\n".join(rubric_comments_lines)
-
-notes_payload = f"""
-Meeting details:
-- Speaker: {meeting.get("speaker") or "N/A"}
-- Evaluator: {meeting.get("evaluator") or "N/A"}
-- Date: {meeting_date_str}
-- Speech title: {meeting.get('speech_title') or 'N/A'}
-
-Selected project context:
-- Pathway: {d["pathway"]}
-- Level: {d["level"]}
-- Project: {d["project"]}
-- Speech length: {d["speech_len"]}
-
-Level focus:
-{d["level_focus"]}
-
-Purpose:
-{d["purpose"]}
-
-Total score:
-- {total_score}/{max_score} ({label})
-
-{selected_criteria_text}
-
-Rubric comments (verbatim):
-{rubric_comments_text if rubric_comments_text else '(None provided)'}
-
-Rubric summary (auto):
-Strengths (ratings 4–5):
-{strengths_text}
-
-Areas for improvement (ratings 1–3):
-{improvements_text}
-
-General comments:
-You excelled at:
-{excelled}
-
-You may want to work on:
-{work_on}
-
-To challenge yourself:
-{challenge}
-""".strip()
+    rubric_comments_lines = []
+    for item in rubric_items:
+        cmt = (item.get("comment") or "").strip()
+        if is_substantive_text(cmt):
+            rubric_comments_lines.append(f"- {item['name']} ({int(item['rating'])}/5): {cmt}")
+    rubric_comments_text = "\n".join(rubric_comments_lines)
+    
+    notes_payload = f"""
+    Meeting details:
+    - Speaker: {meeting.get("speaker") or "N/A"}
+    - Evaluator: {meeting.get("evaluator") or "N/A"}
+    - Date: {meeting_date_str}
+    - Speech title: {meeting.get('speech_title') or 'N/A'}
+    
+    Selected project context:
+    - Pathway: {d["pathway"]}
+    - Level: {d["level"]}
+    - Project: {d["project"]}
+    - Speech length: {d["speech_len"]}
+    
+    Level focus:
+    {d["level_focus"]}
+    
+    Purpose:
+    {d["purpose"]}
+    
+    Total score:
+    - {total_score}/{max_score} ({label})
+    
+    {selected_criteria_text}
+    
+    Rubric comments (verbatim):
+    {rubric_comments_text if rubric_comments_text else '(None provided)'}
+    
+    Rubric summary (auto):
+    Strengths (ratings 4–5):
+    {strengths_text}
+    
+    Areas for improvement (ratings 1–3):
+    {improvements_text}
+    
+    General comments:
+    You excelled at:
+    {excelled}
+    
+    You may want to work on:
+    {work_on}
+    
+    To challenge yourself:
+    {challenge}
+    """.strip()
 
     if st.button("Generate Evaluation Draft (CrewAI)"):
         if run_crewai_eval is None:
@@ -1293,5 +1293,4 @@ if st.session_state.page == "draft":
                     del st.session_state[k]
             st.session_state.page = "select"
             st.rerun()
-
 
