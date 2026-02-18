@@ -1129,11 +1129,19 @@ if st.session_state.page == "evaluation":
             st.error("CrewAI module failed to import.")
             st.code(CREWAI_IMPORT_ERROR)
         else:
-            has_general = (is_substantive_text(excelled) or is_substantive_text(work_on) or is_substantive_text(challenge))
-            has_any_rubric_comment = any(is_substantive_text((x.get("comment") or "")) for x in rubric_items)
-            if not has_general and not has_any_rubric_comment:
+            # Allow generation if the user typed *anything* (even placeholders like "n/a"),
+            # but treat placeholders as non-evidence for alignment guardrails downstream.
+            has_any_general_input = bool((excelled or "").strip() or (work_on or "").strip() or (challenge or "").strip())
+            has_any_rubric_comment = any(bool(((x.get("comment") or "")).strip()) for x in rubric_items)
+
+            has_substantive_general = (is_substantive_text(excelled) or is_substantive_text(work_on) or is_substantive_text(challenge))
+            has_substantive_rubric = any(is_substantive_text((x.get("comment") or "")) for x in rubric_items)
+
+            if not has_any_general_input and not has_any_rubric_comment:
                 st.warning("Please add at least one rubric comment OR fill one general comment box before generating.")
             else:
+                if not has_substantive_general and not has_substantive_rubric:
+                    st.info("No substantive evaluator evidence detected (placeholders only). Alignment indicators will be conservatively withheld for Appendix B6.")
                 # Save payload and navigate to a fresh Draft page.
                 # Everything Step 4 needs (use `.get()` when reading to avoid KeyError)
                 st.session_state.pending_generation = {
