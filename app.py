@@ -449,40 +449,6 @@ def build_export_plaintext(meeting: dict, selection: dict, draft_md: str) -> str
     parts.append("Date: _______________________________")
     return "\n".join(parts)
 
-
-def strip_alignment_checklist(md: str) -> str:
-    """Remove any 'Evaluator Alignment Checklist' section (checkboxes) from exported markdown."""
-    if not md:
-        return md
-    lines = md.splitlines()
-    out = []
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        if line.strip().lower().startswith("## evaluator alignment checklist") or line.strip().lower().startswith("### evaluator alignment checklist"):
-            # skip this heading and subsequent checkbox lines
-            i += 1
-            while i < len(lines):
-                l = lines[i].strip()
-                if l == "":
-                    # keep one blank line and stop skipping
-                    out.append("")
-                    break
-                # typical checkbox markdown patterns
-                if l.startswith("- [") or l.startswith("[") or l.startswith("□") or l.startswith("☐") or l.startswith("- ☐") or l.startswith("- ☑"):
-                    i += 1
-                    continue
-                # stop if we hit another heading
-                if l.startswith("#"):
-                    i -= 1
-                    break
-                i += 1
-            i += 1
-            continue
-        out.append(line)
-        i += 1
-    return "\n".join(out).strip() + "\n"
-
 def build_export_html(
     title: str,
     meeting: dict,
@@ -491,8 +457,6 @@ def build_export_html(
     competency: dict = None,
 ) -> str:
     """Create a clean, print-to-PDF-friendly HTML file."""
-
-    draft_md = strip_alignment_checklist(draft_md)
 
     safe_md = strip_code_fences(draft_md)
 
@@ -556,24 +520,28 @@ def build_export_html(
         except Exception:
             competency_html = ""
 
-    css = """
-    @page { size: A4; margin: 14mm; }
-    body { font-family: Arial, Helvetica, sans-serif; color: #111; }
-    h1 { margin: 0 0 6px 0; font-size: 22px; }
-    .sub { color: #666; font-size: 12px; margin-bottom: 12px; }
-    .grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 10px; }
-    .box { border: 1px solid #111; padding: 10px; border-radius: 4px; }
-    .box h2 { margin: 0 0 8px 0; font-size: 14px; letter-spacing: .2px; }
-    table { width: 100%; border-collapse: collapse; }
-    th { text-align: left; width: 120px; font-size: 12px; padding: 2px 0; }
-    td { font-size: 12px; padding: 2px 0; }
-    hr { border: 0; border-top: 1px solid #111; margin: 12px 0; }
-    .draft { border: 1px solid #111; padding: 12px; border-radius: 4px; }
-    .draft h2 { margin-top: 14px; }
-    .draft p, .draft li { font-size: 12px; line-height: 1.35; }
-    pre { background: #f6f6f6; padding: 10px; border-radius: 4px; }
-    code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; }
-    """
+    css = """@page { size: A4; margin: 10mm; }
+html, body { width: 210mm; }
+body { font-family: Arial, Helvetica, sans-serif; margin: 0; color: #111; font-size: 12px; }
+h1 { font-size: 22px; margin: 0 0 4px 0; }
+.sub { font-size: 11px; color: #444; margin-bottom: 8px; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; break-inside: avoid; page-break-inside: avoid; }
+.box { border: 1px solid #111; border-radius: 4px; padding: 8px 10px; break-inside: avoid; page-break-inside: avoid; }
+.box h2 { font-size: 14px; margin: 0 0 6px 0; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th { text-align: left; font-weight: 700; padding: 2px 6px 2px 0; width: 130px; vertical-align: top; }
+td { padding: 2px 0; vertical-align: top; }
+hr { border: 0; border-top: 1px solid #111; margin: 8px 0; }
+.draft { border: 1px solid #ddd; background: #f7f7f7; padding: 10px; border-radius: 4px; font-size: 11px; line-height: 1.25; }
+.draft h2 { margin: 10px 0 4px 0; font-size: 13px; }
+.draft ul, .draft ol { margin: 4px 0 8px 18px; }
+.draft p { margin: 0 0 6px 0; }
+.small { font-size: 11px; color: #333; }
+.print-only { display: none; }
+@media print {
+  .no-print { display: none !important; }
+  .print-only { display: block; }
+}"""
 
     html_out = f"""<!doctype html>
 <html>
@@ -609,13 +577,13 @@ def build_export_html(
     <div class="box">
       <h2>Sign-off</h2>
       <table>
-        <tr><th>Evaluator Signature</th><td style="height:28px;border-bottom:1px solid #111;"></td></tr>
-        <tr><th>Date</th><td style="height:22px;border-bottom:1px solid #111;"></td></tr>
+        <tr><th>Evaluator Signature</th><td style="height:18px;border-bottom:1px solid #111;"></td></tr>
+        <tr><th>Date</th><td style="height:16px;border-bottom:1px solid #111;"></td></tr>
       </table>
     </div>
     <div class="box">
       <h2>Notes</h2>
-      <div style="font-size:12px;color:#333;">(Optional) Add any final handwritten notes after printing.</div>
+      <div class="small">(Optional) Add any final handwritten notes after printing.</div>
     </div>
   </div>
 
@@ -1074,7 +1042,17 @@ if st.session_state.page == "draft":
     evidence_for_export = strip_code_fences(st.session_state.get("purpose_alignment_evidence", purpose_section)).strip()
     combined_md = (edited_main.strip() + ("\n\n" + evidence_for_export if evidence_for_export else "")).strip()
 
-    # (Export) Evaluator alignment checklist removed to keep PDF to one page.
+    # Append a single evaluator-controlled checklist (export only)
+    final_checks = st.session_state.get("align_overrides", {})
+    checklist_lines = [
+        "## Evaluator Alignment Checklist",
+        "- [x] Purpose clearly addressed" if final_checks.get("Purpose clearly addressed") else "- [ ] Purpose clearly addressed",
+        "- [x] Level focus demonstrated" if final_checks.get("Level focus demonstrated") else "- [ ] Level focus demonstrated",
+        "- [x] Feedback linked to evaluation criteria" if final_checks.get("Feedback linked to evaluation criteria") else "- [ ] Feedback linked to evaluation criteria",
+        "- [x] Balanced commendations + improvements" if final_checks.get("Balanced commendations + improvements") else "- [ ] Balanced commendations + improvements",
+        "- [x] Actionable next step provided" if final_checks.get("Actionable next step provided") else "- [ ] Actionable next step provided",
+    ]
+    combined_md = (combined_md + "\n\n" + "\n".join(checklist_lines)).strip()
 
     # Build filenames
     ts = time.strftime("%Y%m%d_%H%M%S")
