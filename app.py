@@ -402,14 +402,18 @@ def build_export_html(
     meeting: dict,
     selection: dict,
     draft_md: str,
+    rubric_items=None,
+    total_score=None,
+    max_score=None,
 ) -> str:
     """Create a clean, print-to-PDF-friendly HTML file."""
 
     # Very small markdown -> HTML (safe fallback)
     try:
         import markdown as md  # type: ignore
-
-        draft_html = md.markdown(draft_md, extensions=["fenced_code", "tables"])
+        draft_html = md.markdown(draft_md or "", extensions=["fenced_code", "tables"])
+    except Exception:
+        draft_html = f"<pre style='white-space:pre-wrap'>{html.escape(draft_md or '')}</pre>"
 
     # --- Competency summary for export (based on rubric ratings) ---
     competency_section = ""
@@ -418,13 +422,13 @@ def build_export_html(
             band, label = overall_band(int(total_score))
             strengths = [it for it in rubric_items if int(it.get("rating", 0)) >= 4]
             improvements = [it for it in rubric_items if int(it.get("rating", 0)) <= 3]
+
             def _li(item):
-                crit = html_escape(str(item.get("criterion","")))
-                rating = html_escape(str(item.get("rating","")))
-                comment = (item.get("comment") or "").strip()
-                if not comment:
-                    comment = "No comment"
+                crit = html_escape(str(item.get("criterion", "")))
+                rating = html_escape(str(item.get("rating", "")))
+                comment = (item.get("comment") or "").strip() or "No comment"
                 return f"<li><b>{crit}</b> ({rating}/5) — {html_escape(comment)}</li>"
+
             strengths_html = "".join([_li(it) for it in strengths]) or "<li>—</li>"
             improvements_html = "".join([_li(it) for it in improvements]) or "<li>—</li>"
 
@@ -449,8 +453,6 @@ def build_export_html(
     except Exception:
         competency_section = ""
 
-    except Exception:
-        draft_html = f"<pre style='white-space:pre-wrap'>{html.escape(draft_md)}</pre>"
 
     def row(k, v):
         v = "" if v is None else str(v)
@@ -839,6 +841,9 @@ if st.session_state.page == "draft_loading":
         meeting=meeting,
         selection=selection,
         draft_md=output,
+            rubric_items=rubric_items,
+            total_score=total_score,
+            max_score=max_score,
     )
 
     st.session_state.page = "draft"
