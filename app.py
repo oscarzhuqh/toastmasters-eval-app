@@ -299,7 +299,10 @@ def render_rubric_table(rubric_def):
       [Criteria] | [5 4 3 2 1] | [Comment box]
     Default rating = 3.
     """
-    rubric_items = []
+    rubric_items = st.session_state.get('rubric_items', [])
+    st.session_state.setdefault('rubric_items', rubric_items)
+    # Always keep a local alias for safety
+    rubric_items = st.session_state.get('rubric_items', [])
 
     with st.container(border=True):
         h1, h2, h3 = st.columns([2.2, 3.2, 3.6], vertical_alignment="center")
@@ -841,9 +844,9 @@ if st.session_state.page == "draft_loading":
         meeting=meeting,
         selection=selection,
         draft_md=output,
-            rubric_items=rubric_items,
-            total_score=total_score,
-            max_score=max_score,
+        rubric_items=st.session_state.get('rubric_items', []),
+        total_score=total_score,
+        max_score=max_score,
     )
 
     st.session_state.page = "draft"
@@ -1052,6 +1055,7 @@ if st.session_state.page == "evaluation":
 
     rubric_items = render_rubric_table(RUBRIC_DEF)
 
+    st.session_state['rubric_items'] = rubric_items
     # ✅ Total score + legend
     total_score = compute_total_score(rubric_items)
     max_score = len(rubric_items) * 5
