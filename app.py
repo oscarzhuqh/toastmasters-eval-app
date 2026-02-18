@@ -387,6 +387,30 @@ def is_substantive_text(s: str) -> bool:
     # require at least 3 alphabetic characters
     return len(re.findall(r"[A-Za-z]", s)) >= 3
 
+
+
+def strip_code_fences(md: str) -> str:
+    """Remove accidental fenced-code wrappers like ```markdown ... ``` that sometimes appear in LLM output."""
+    if not md:
+        return ""
+    s = md.strip()
+    # Remove a single outer fence if present
+    s = re.sub(r"^```[a-zA-Z0-9_-]*\s*\n", "", s)
+    s = re.sub(r"\n```\s*$", "", s)
+    return s
+
+def remove_alignment_blocks(md: str) -> str:
+    """Remove duplicate checklist/purpose-alignment blocks from the editable draft area."""
+    if not md:
+        return ""
+    s = md
+    # Remove "## Checklist" section
+    s = _remove_h2_section(s, "Checklist")
+    # Remove older "## Purpose Alignment" section (not the evidence-bound one)
+    s = _remove_h2_section(s, "Purpose Alignment")
+    # Also remove any stray checklist lines near the end
+    s = _strip_checklist_lines(s)
+    return s.strip()
 def build_selected_criteria_text(project: str, rubric_items):
     if not is_ice_breaker(project):
         return ""
@@ -410,13 +434,24 @@ def build_export_html(
 ) -> str:
     """Create a clean, print-to-PDF-friendly HTML file."""
 
-    # Very small markdown -> HTML (safe fallback)
-    try:
-        import markdown as md  # type: ignore
+    safe_md = strip_code_fences(draft_md)
 
-        draft_html = md.markdown(draft_md, extensions=["fenced_code", "tables"])
+    # Render checklists nicely in HTML (keep it simple and print-friendly)
+    safe_md = safe_md.replace("- [x] ", "☑ ").replace("- [ ] ", "☐ ")
+
+    try:
+        import markdown2  # type: ignore
+
+        draft_html = markdown2.markdown(
+            safe_md,
+            extras=[
+                "fenced-code-blocks",
+                "tables",
+                "break-on-newline",
+            ],
+        )
     except Exception:
-        draft_html = f"<pre style='white-space:pre-wrap'>{html.escape(draft_md)}</pre>"
+        draft_html = f"<pre style='white-space:pre-wrap'>{html.escape(safe_md)}</pre>"
 
     def row(k, v):
         v = "" if v is None else str(v)
@@ -424,63 +459,71 @@ def build_export_html(
 
     meeting_rows = "".join(
         [
-            row("Speaker", meeting.get("speaker_name")),
-            row("Evaluator", meeting.get("evaluator_name")),
-            row("Date", meeting.get("meeting_date")),
-            row("Speech Title", meeting.get("speech_title")),
-        ]
-    )
-    selection_rows = "".join(
-        [
-            row("Pathway", selection.get("pathway")),
-            row("Level", selection.get("level")),
-            row("Project", selection.get("project")),
-            row("Speech Length", selection.get("speech_len")),
+            row("Speaker", meeting.get("speaker", "")),
+            row("Evaluator", meeting.get("evaluator", "")),
+            row("Date", meeting.get("date", "")),
+            row("Speech Title", meeting.get("title", "")),
         ]
     )
 
-    return f"""<!doctype html>
-<html lang=\"en\">
+    selection_rows = "".join(
+        [
+            row("Pathway", selection.get("pathway", "")),
+            row("Level", selection.get("level", "")),
+            row("Project", selection.get("project", "")),
+            row("Speech Length", selection.get("speech_len", "")),
+        ]
+    )
+
+    css = """
+    @page { size: A4; margin: 14mm; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #111; }
+    h1 { margin: 0 0 6px 0; font-size: 22px; }
+    .sub { color: #666; font-size: 12px; margin-bottom: 12px; }
+    .grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 10px; }
+    .box { border: 1px solid #111; padding: 10px; border-radius: 4px; }
+    .box h2 { margin: 0 0 8px 0; font-size: 14px; letter-spacing: .2px; }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; width: 120px; font-size: 12px; padding: 2px 0; }
+    td { font-size: 12px; padding: 2px 0; }
+    hr { border: 0; border-top: 1px solid #111; margin: 12px 0; }
+    .draft { border: 1px solid #111; padding: 12px; border-radius: 4px; }
+    .draft h2 { margin-top: 14px; }
+    .draft p, .draft li { font-size: 12px; line-height: 1.35; }
+    pre { background: #f6f6f6; padding: 10px; border-radius: 4px; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; }
+    """
+
+    html_out = f"""<!doctype html>
+<html>
 <head>
-  <meta charset=\"utf-8\" />
-  <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\" />
+  <meta charset="utf-8" />
   <title>{html.escape(title)}</title>
-  <style>
-    body {{ font-family: -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif; margin: 32px; color:#111; }}
-    h1 {{ margin: 0 0 6px 0; font-size: 28px; }}
-    .subtitle {{ color:#555; margin-bottom: 18px; }}
-    .grid {{ display:grid; grid-template-columns: 1fr 1fr; gap: 18px; margin: 18px 0 22px 0; }}
-    .card {{ border:1px solid #e6e6e6; border-radius: 12px; padding: 14px 16px; }}
-    table {{ width:100%; border-collapse: collapse; }}
-    th {{ text-align:left; padding:6px 0; width: 32%; color:#444; font-weight:600; vertical-align: top; }}
-    td {{ padding:6px 0; }}
-    hr {{ border:0; border-top:1px solid #eee; margin: 20px 0; }}
-    .draft {{ line-height: 1.55; }}
-    @media print {{ body {{ margin: 16mm; }} .card {{ break-inside: avoid; }} }}
-  </style>
+  <style>{css}</style>
 </head>
 <body>
   <h1>{html.escape(title)}</h1>
-  <div class=\"subtitle\">Generated by Toastmasters Evaluation Assistant (T.E.A.)</div>
+  <div class="sub">Generated by Toastmasters Evaluation Assistant (T.E.A.)</div>
 
-  <div class=\"grid\">
-    <div class=\"card\">
-      <h2 style=\"margin:0 0 8px 0; font-size:18px\">Meeting Details</h2>
+  <div class="grid">
+    <div class="box">
+      <h2>Meeting Details</h2>
       <table>{meeting_rows}</table>
     </div>
-    <div class=\"card\">
-      <h2 style=\"margin:0 0 8px 0; font-size:18px\">Project Selection</h2>
+    <div class="box">
+      <h2>Project Selection</h2>
       <table>{selection_rows}</table>
     </div>
   </div>
 
   <hr />
-  <h2 style=\"margin:0 0 10px 0\">Evaluation Draft</h2>
-  <div class=\"draft\">{draft_html}</div>
+
+  <div class="draft">
+    {draft_html}
+  </div>
 </body>
 </html>"""
-
-
+    return html_out
 def make_pdf_bytes(title: str, body_text: str) -> bytes:
     """Create a simple A4 PDF (plain text) for download."""
     if canvas is None or A4 is None or cm is None:
@@ -537,24 +580,63 @@ def make_pdf_bytes(title: str, body_text: str) -> bytes:
 
 
 
-def split_purpose_alignment_section(md: str) -> tuple[str, str]:
-    """Return (purpose_section_text, remaining_md_without_section).
-
-    Looks for a '## Purpose Alignment' section and removes it from the main draft so it can be displayed separately (B5-style).
-    If not found, returns ("", md).
-    """
-    md = md or ""
-    m = re.search(r"^##\s+Purpose\s+Alignment\b.*$", md, flags=re.IGNORECASE | re.MULTILINE)
+def _remove_h2_section(md: str, heading: str) -> str:
+    """Remove a H2 section (## <heading>) and its body up to the next H2."""
+    if not md:
+        return md
+    m = re.search(rf"^##\s+{re.escape(heading)}\b.*$", md, flags=re.IGNORECASE | re.MULTILINE)
     if not m:
-        return "", md
+        return md
     start = m.start()
     after = md[m.end():]
-    # Capture until next H2
     m2 = re.search(r"^##\s+\S", after, flags=re.MULTILINE)
     end = m.end() + (m2.start() if m2 else len(after))
-    section = md[start:end].strip()
-    remaining = (md[:start] + "\n\n" + md[end:]).strip()
-    return section, remaining
+    return (md[:start] + "\n\n" + md[end:]).strip()
+
+
+def _strip_checklist_lines(block: str) -> str:
+    """Remove markdown checklist bullets from a block (keeps narrative evidence)."""
+    if not block:
+        return block
+    cleaned = []
+    for ln in (block or "").splitlines():
+        if re.match(r"^\s*-\s*\[(x| )\]\s+", ln, flags=re.IGNORECASE):
+            continue
+        # Also drop a duplicated checklist heading if present inside the block
+        if re.match(r"^\s*##\s+Checklist\b", ln, flags=re.IGNORECASE):
+            continue
+        cleaned.append(ln)
+    return "\n".join(cleaned).strip()
+
+
+def split_purpose_alignment_section(md: str) -> tuple[str, str]:
+    """Return (purpose_section_text, remaining_md_without_alignment_or_checklist).
+
+    - Removes '## Purpose Alignment' (any casing) from the main draft so it is displayed separately.
+    - Removes '## Checklist' from the main draft to avoid duplicate/contradicting checklists.
+    """
+    md = (md or "").strip()
+    if not md:
+        return "", ""
+
+    # Extract Purpose Alignment section (if any)
+    purpose_section = ""
+    m = re.search(r"^##\s+Purpose\s+Alignment\b.*$", md, flags=re.IGNORECASE | re.MULTILINE)
+    if m:
+        start = m.start()
+        after = md[m.end():]
+        m2 = re.search(r"^##\s+\S", after, flags=re.MULTILINE)
+        end = m.end() + (m2.start() if m2 else len(after))
+        purpose_section = md[start:end].strip()
+        md = (md[:start] + "\n\n" + md[end:]).strip()
+
+    # Always remove Checklist section from the editable draft
+    md = _remove_h2_section(md, "Checklist")
+
+    # Strip checklist bullets from the evidence block (keep narrative only)
+    purpose_section = _strip_checklist_lines(purpose_section)
+
+    return purpose_section, md
 
 
 def extract_purpose_alignment(md: str) -> tuple[str, dict[str, bool]]:
@@ -838,39 +920,68 @@ if st.session_state.page == "draft":
 
     st.subheader("Evaluation draft (editable)")
 
-    full_md = st.session_state.get("draft_md") or ""
+    full_md_raw = st.session_state.get("draft_md") or ""
+    # Remove accidental fenced code wrappers like ```markdown ... ```
+    full_md = strip_code_fences(full_md_raw)
+
     purpose_section, main_md = split_purpose_alignment_section(full_md)
+
+    # Remove duplicate checklist / purpose-alignment blocks from the editable draft area
+    main_md_clean = remove_alignment_blocks(main_md)
 
     edited_main = st.text_area(
         "You can edit the draft below before exporting:",
-        value=main_md,
+        value=main_md_clean,
         height=520,
         key="draft_editor",
     )
 
-    # Purpose-alignment indicator (B5-style: shown below the draft, not embedded inside it)
+    # Purpose-alignment indicator (shown below the draft, not embedded inside it)
     with st.expander("Purpose alignment indicator (AI-suggested)", expanded=False):
-        if purpose_section:
+        evidence_text = strip_code_fences(purpose_section).strip()
+        if evidence_text:
             st.text_area(
                 "Evidence (from draft)",
-                value=purpose_section,
+                value=evidence_text,
                 height=240,
                 key="purpose_alignment_evidence",
             )
         else:
             st.info("No purpose alignment section found in the draft.")
 
-        # Auto-indicators (read-only snapshot for Appendix screenshots)
-        combined_for_checks = (edited_main.strip() + "\n\n" + purpose_section.strip()).strip()
-        align_summary, align_checks = extract_purpose_alignment(combined_for_checks)
+        # Suggested indicators derived from the generated draft (AI-suggested)
+        align_summary, align_checks = extract_purpose_alignment(full_md)
         if align_summary:
             st.caption(align_summary)
-        for label, checked in align_checks.items():
-            st.checkbox(label, value=checked, disabled=True)
 
-    # Rebuild combined markdown for export
-    purpose_for_export = st.session_state.get("purpose_alignment_evidence", purpose_section).strip()
-    combined_md = (edited_main.strip() + ("\n\n" + purpose_for_export if purpose_for_export else "")).strip()
+        st.markdown("**Indicators (editable):**")
+
+        # Persist evaluator decisions (editable, NOT disabled)
+        if "align_overrides" not in st.session_state:
+            st.session_state["align_overrides"] = dict(align_checks)
+
+        editable = {}
+        for label, suggested in align_checks.items():
+            key = f"align_chk_{re.sub(r'[^a-zA-Z0-9]+', '_', label.lower()).strip('_')}"
+            current = st.session_state["align_overrides"].get(label, suggested)
+            editable[label] = bool(st.checkbox(label, value=bool(current), key=key))
+        st.session_state["align_overrides"] = dict(editable)
+
+    # ---------- Rebuild combined markdown for export ----------
+    evidence_for_export = strip_code_fences(st.session_state.get("purpose_alignment_evidence", purpose_section)).strip()
+    combined_md = (edited_main.strip() + ("\n\n" + evidence_for_export if evidence_for_export else "")).strip()
+
+    # Append a single evaluator-controlled checklist (export only)
+    final_checks = st.session_state.get("align_overrides", {})
+    checklist_lines = [
+        "## Evaluator Alignment Checklist",
+        "- [x] Purpose clearly addressed" if final_checks.get("Purpose clearly addressed") else "- [ ] Purpose clearly addressed",
+        "- [x] Level focus demonstrated" if final_checks.get("Level focus demonstrated") else "- [ ] Level focus demonstrated",
+        "- [x] Feedback linked to evaluation criteria" if final_checks.get("Feedback linked to evaluation criteria") else "- [ ] Feedback linked to evaluation criteria",
+        "- [x] Balanced commendations + improvements" if final_checks.get("Balanced commendations + improvements") else "- [ ] Balanced commendations + improvements",
+        "- [x] Actionable next step provided" if final_checks.get("Actionable next step provided") else "- [ ] Actionable next step provided",
+    ]
+    combined_md = (combined_md + "\n\n" + "\n".join(checklist_lines)).strip()
 
     # Build filenames
     ts = time.strftime("%Y%m%d_%H%M%S")
@@ -878,9 +989,14 @@ if st.session_state.page == "draft":
     html_name = f"tea_evaluation_draft_{ts}.html"
     pdf_name = f"tea_evaluation_draft_{ts}.pdf"
 
+    # Export buttons
     st.markdown("---")
     st.subheader("Export")
-    ack = st.checkbox("I have reviewed the draft and confirm it reflects my evaluation before exporting.", key="ack_review")
+    ack = st.checkbox(
+        "I have reviewed the draft and confirm it reflects my evaluation before exporting.",
+        key="ack_review"
+    )
+
     c1, c2, c3 = st.columns(3)
     with c1:
         st.download_button(
@@ -890,8 +1006,8 @@ if st.session_state.page == "draft":
             mime="text/markdown",
             use_container_width=True,
         )
+
     with c2:
-        # Rebuild HTML using the edited version (for PDF-print friendly output)
         meeting = (st.session_state.get("pending_generation") or {}).get("meeting", {})
         selection = {
             "pathway": (st.session_state.get("pending_generation") or {}).get("pathway"),
@@ -913,6 +1029,7 @@ if st.session_state.page == "draft":
             disabled=not ack,
             use_container_width=True,
         )
+
     with c3:
         pdf_bytes = make_pdf_bytes("Toastmasters Evaluation Draft", combined_md)
         if not pdf_bytes:
@@ -935,10 +1052,8 @@ if st.session_state.page == "draft":
                 use_container_width=True,
             )
 
-
     st.caption(
-        "PDF tip: you can download PDF directly, or open the downloaded HTML in Chrome/Edge, then use Print → Save as PDF. "
-        "(This keeps formatting cleaner than copying from the app.)"
+        "PDF tip: you can download PDF directly, or open the downloaded HTML in Chrome/Edge, then use Print → Save as PDF."
     )
 
     st.markdown("---")
@@ -951,8 +1066,8 @@ if st.session_state.page == "draft":
         if st.button("🏠 Start Over"):
             st.session_state.page = "select"
             st.rerun()
-    st.stop()
 
+    st.stop()
 
 # ==================== PAGE 2: LOADING ====================
 if st.session_state.page == "loading":
@@ -1345,4 +1460,3 @@ if st.session_state.page == "draft":
                     del st.session_state[k]
             st.session_state.page = "select"
             st.rerun()
-
