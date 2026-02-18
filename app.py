@@ -398,51 +398,35 @@ def build_export_html(
     meeting: dict,
     selection: dict,
     draft_md: str,
-    align_final: dict | None = None,
 ) -> str:
-    """Create a clean, print-to-PDF-friendly HTML file."""
+    """Create a clean, print-to-PDF-friendly HTML file (meeting-ready layout)."""
 
-    # Remove any in-draft alignment/checklist blocks (the printable checklist is rendered separately below)
-    def _strip_alignment_blocks(md: str) -> str:
-        md = re.sub(r"^##\s+Purpose\s+Alignment[\s\S]*?(?=^##\s+|\Z)", "", md, flags=re.MULTILINE)
-        md = re.sub(r"^##\s+Evaluator\s+Alignment\s+Checklist[\s\S]*?(?=^##\s+|\Z)", "", md, flags=re.MULTILINE)
-        md = re.sub(r"^###\s+Evaluator\s+Alignment\s+Checklist[\s\S]*?(?=^##\s+|\Z)", "", md, flags=re.MULTILINE)
-        return md.strip()
+    import html as _html
 
-    draft_md = _strip_alignment_blocks(draft_md)
+    def _safe(v):
+        return "" if v is None else str(v)
 
-    # Alignment checklist for export (uses evaluator-edited values if available)
-    align_final = align_final or {}
-    def _render_align_list(d: dict) -> str:
-        if not d:
-            return ""
-        items = []
-        for label, checked in d.items():
-            mark = "☑" if checked else "☐"
-            items.append(f"<li>{mark} {html.escape(str(label))}</li>")
-        return "<div class='box'><div class='box-title'>Evaluator Alignment Checklist</div><ul class='checklist'>" + "".join(items) + "</ul></div>"
-
-
-    # Very small markdown -> HTML (safe fallback)
+    # Markdown -> HTML (safe fallback)
     try:
-        import markdown as md  # type: ignore
+        import markdown as _md  # type: ignore
 
-        draft_html = md.markdown(draft_md, extensions=["fenced_code", "tables"])
+        draft_html = _md.markdown(draft_md, extensions=["fenced_code", "tables"])
     except Exception:
-        draft_html = f"<pre style='white-space:pre-wrap'>{html.escape(draft_md)}</pre>"
+        draft_html = f"<pre style='white-space:pre-wrap'>{_html.escape(_safe(draft_md))}</pre>"
 
-    def row(k, v):
-        v = "" if v is None else str(v)
-        return f"<tr><th>{html.escape(k)}</th><td>{html.escape(v)}</td></tr>"
+    # Rows
+    def row(k: str, v: str) -> str:
+        return f"<tr><th>{_html.escape(k)}</th><td>{_html.escape(_safe(v))}</td></tr>"
 
     meeting_rows = "".join(
         [
-            row("Speaker", meeting.get("speaker") or meeting.get("speaker_name") or ""),
-            row("Evaluator", meeting.get("evaluator") or meeting.get("evaluator_name") or ""),
-            row("Date", meeting.get("date") or meeting.get("meeting_date") or ""),
-            row("Speech Title", meeting.get("speech_title") or meeting.get("title") or ""),
+            row("Speaker", meeting.get("speaker")),
+            row("Evaluator", meeting.get("evaluator")),
+            row("Date", meeting.get("date")),
+            row("Speech Title", meeting.get("speech_title")),
         ]
     )
+
     selection_rows = "".join(
         [
             row("Pathway", selection.get("pathway")),
@@ -452,50 +436,146 @@ def build_export_html(
         ]
     )
 
-alignment_html = _render_align_list(align_final)
+    page_title = _html.escape(_safe(title) or "Toastmasters Evaluation Draft")
 
-        return f"""<!doctype html>
-<html lang=\"en\">
+    return f"""<!doctype html>
+<html lang="en">
 <head>
-  <meta charset=\"utf-8\" />
-  <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\" />
-  <title>{html.escape(title)}</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>{page_title}</title>
   <style>
-    body {{ font-family: -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif; margin: 32px; color:#111; }}
-    h1 {{ margin: 0 0 6px 0; font-size: 28px; }}
-    .subtitle {{ color:#555; margin-bottom: 18px; }}
-    .grid {{ display:grid; grid-template-columns: 1fr 1fr; gap: 18px; margin: 18px 0 22px 0; }}
-    .card {{ border:1px solid #e6e6e6; border-radius: 12px; padding: 14px 16px; }}
-    table {{ width:100%; border-collapse: collapse; }}
-    th {{ text-align:left; padding:6px 0; width: 32%; color:#444; font-weight:600; vertical-align: top; }}
-    td {{ padding:6px 0; }}
-    hr {{ border:0; border-top:1px solid #eee; margin: 20px 0; }}
-    .draft {{ line-height: 1.55; }}
-    @media print {{ body {{ margin: 16mm; }} .card {{ break-inside: avoid; }} }}
+    :root {{
+      --ink:#111;
+      --muted:#666;
+      --border:#000;
+      --soft:#f5f7fb;
+    }}
+    body {{
+      font-family: -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+      margin: 24px;
+      color: var(--ink);
+      font-size: 12px;
+    }}
+    h1 {{
+      font-size: 18px;
+      margin: 0 0 4px 0;
+    }}
+    .subtitle {{
+      color: var(--muted);
+      margin: 0 0 16px 0;
+    }}
+    .grid {{
+      display: grid;
+      grid-template-columns: 1.25fr 1fr;
+      gap: 10px;
+      align-items: stretch;
+    }}
+    .card {{
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 10px;
+      min-height: 86px;
+    }}
+    .card h2 {{
+      font-size: 13px;
+      margin: 0 0 6px 0;
+      font-weight: 700;
+    }}
+    table {{
+      width:100%;
+      border-collapse: collapse;
+    }}
+    th {{
+      text-align:left;
+      padding: 3px 0;
+      width: 32%;
+      color: var(--ink);
+      font-weight: 700;
+      vertical-align: top;
+    }}
+    td {{
+      padding: 3px 0;
+      vertical-align: top;
+    }}
+    .section {{
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 10px;
+      margin-top: 10px;
+    }}
+    .section h2 {{
+      font-size: 13px;
+      margin: 0 0 8px 0;
+      font-weight: 700;
+    }}
+    .draft {{
+      line-height: 1.45;
+    }}
+    .draft pre, .draft code {{
+      background: var(--soft);
+      border-radius: 4px;
+      padding: 6px;
+      overflow-x: auto;
+    }}
+    .footer-grid {{
+      display: grid;
+      grid-template-columns: 1.25fr 1fr;
+      gap: 10px;
+      margin-top: 10px;
+    }}
+    .line {{
+      display: inline-block;
+      border-bottom: 1px solid #000;
+      width: 220px;
+      height: 10px;
+      vertical-align: bottom;
+    }}
+    .notes-box {{
+      height: 70px;
+    }}
+    @media print {{
+      body {{ margin: 14mm; }}
+      .card, .section {{ break-inside: avoid; page-break-inside: avoid; }}
+    }}
   </style>
 </head>
 <body>
-  <h1>{html.escape(title)}</h1>
-  <div class=\"subtitle\">Generated by Toastmasters Evaluation Assistant (T.E.A.)</div>
+  <h1>{page_title}</h1>
+  <div class="subtitle">Generated by Toastmasters Evaluation Assistant (T.E.A.)</div>
 
-  <div class=\"grid\">
-    <div class=\"card\">
-      <h2 style=\"margin:0 0 8px 0; font-size:18px\">Meeting Details</h2>
+  <div class="grid">
+    <div class="card">
+      <h2>Meeting Details</h2>
       <table>{meeting_rows}</table>
     </div>
-    <div class=\"card\">
-      <h2 style=\"margin:0 0 8px 0; font-size:18px\">Project Selection</h2>
+    <div class="card">
+      <h2>Project Selection</h2>
       <table>{selection_rows}</table>
     </div>
   </div>
 
-  <hr />
-  <h2 style=\"margin:0 0 10px 0\">Evaluation Draft</h2>
-  <div class=\"draft\">{draft_html}</div>
+  <div class="section">
+    <h2>Evaluation Draft</h2>
+    <div class="draft">{draft_html}</div>
+  </div>
+
+  <div class="footer-grid">
+    <div class="card">
+      <h2>Sign-off</h2>
+      <table>
+        <tr><th>Evaluator Signature</th><td><span class="line"></span></td></tr>
+        <tr><th>Date</th><td><span class="line"></span></td></tr>
+      </table>
+    </div>
+    <div class="card notes-box">
+      <h2>Notes</h2>
+      <div style="color:var(--muted)">(Optional) Add any final handwritten notes after printing.</div>
+    </div>
+  </div>
+
 </body>
 </html>"""
-
-
 def make_pdf_bytes(title: str, body_text: str) -> bytes:
     """Create a simple A4 PDF (plain text) for download."""
     if canvas is None or A4 is None or cm is None:
@@ -815,12 +895,11 @@ if st.session_state.page == "draft_loading":
         "speech_len": pending.get("speech_len"),
     }
     st.session_state.draft_html = build_export_html(
-            title="Toastmasters Evaluation Draft",
-            meeting=meeting,
-            selection=selection,
-            draft_md=output,
-            align_final=st.session_state.get(\"align_final\")
-        )
+        title="Toastmasters Evaluation Draft",
+        meeting=meeting,
+        selection=selection,
+        draft_md=output,
+    )
 
     st.session_state.page = "draft"
     st.rerun()
@@ -842,19 +921,11 @@ if st.session_state.page == "draft":
 
     # Purpose-alignment indicator (for report screenshots)
     align_summary, align_checks = extract_purpose_alignment(edited)
-    with st.expander("Purpose alignment indicator (AI-suggested)", expanded=False):
-        # Show the evidence-bound summary (editable text stays in the draft box above)
+    with st.expander("Purpose alignment indicator (auto)", expanded=False):
         if align_summary:
             st.caption(align_summary)
-
-        st.caption("AI suggests these indicators from the available evidence. Please review and adjust before exporting.")
-        align_final: dict[str, bool] = {}
         for label, checked in align_checks.items():
-            key = "align_" + re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")
-            align_final[label] = st.checkbox(label, value=checked, key=key)
-
-        # Persist the evaluator's final decision for export
-        st.session_state["align_final"] = align_final
+            st.checkbox(label, value=checked, disabled=True)
 
     # Build filenames
     ts = time.strftime("%Y%m%d_%H%M%S")
@@ -887,7 +958,6 @@ if st.session_state.page == "draft":
             meeting=meeting,
             selection=selection,
             draft_md=edited,
-            align_final=st.session_state.get(\"align_final\")
         )
         st.download_button(
             "⬇️ Download HTML (print to PDF)",
@@ -1245,12 +1315,11 @@ if st.session_state.page == "draft":
     }
 
     html_doc = build_export_html(
-            title="Toastmasters Evaluation Draft",
-            meeting=meeting,
-            selection=selection,
-            draft_md=edited,
-            align_final=st.session_state.get(\"align_final\")
-        )
+        title="Toastmasters Evaluation Draft",
+        meeting=meeting,
+        selection=selection,
+        draft_md=edited,
+    )
 
     ts = time.strftime("%Y%m%d_%H%M%S")
     base = f"toastmasters_evaluation_{ts}"
@@ -1308,5 +1377,4 @@ if st.session_state.page == "draft":
                     del st.session_state[k]
             st.session_state.page = "select"
             st.rerun()
-
 
