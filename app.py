@@ -167,14 +167,29 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-      textarea { background-color: #EAF0FF !important; }
-      div[data-testid="stVerticalBlock"] > div { gap: 0.55rem; }
-      /* Make the central project-details box feel less wide */
-      .tea-narrow { max-width: 680px; margin: 0 auto; }
+    /* Force dark text inside all input-like components */
+    input, textarea, [contenteditable="true"] {
+        color: #111111 !important;
+        background-color: #ffffff !important;
+    }
+
+    /* Streamlit-specific text areas */
+    .stTextInput input,
+    .stTextArea textarea {
+        color: #111111 !important;
+        background-color: #ffffff !important;
+    }
+
+    /* Placeholder text (mobile browsers often fade this badly) */
+    ::placeholder {
+        color: #555555 !important;
+        opacity: 1 !important;
+    }
     </style>
     """,
-    unsafe_allow_html=True,
+    unsafe_allow_html=True
 )
+
 
 
 # ==================== HELPERS ====================
