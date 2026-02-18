@@ -934,7 +934,7 @@ if st.session_state.page == "draft_loading":
     st.session_state.crewai_output = output
     st.session_state.draft_md = output
 
-    meeting = pending.get("meeting", {})
+    meeting = (pending.get("meeting") or st.session_state.get("meeting") or {})
     selection = {
         "pathway": pending.get("pathway"),
         "level": pending.get("level"),
@@ -1047,7 +1047,7 @@ if st.session_state.page == "draft":
         )
 
     with c2:
-        meeting = (st.session_state.get("pending_generation") or {}).get("meeting", {})
+        meeting = ((st.session_state.get("pending_generation") or {}).get("meeting") or st.session_state.get("meeting") or {})
         selection = {
             "pathway": (st.session_state.get("pending_generation") or {}).get("pathway"),
             "level": (st.session_state.get("pending_generation") or {}).get("level"),
@@ -1344,6 +1344,7 @@ if st.session_state.page == "evaluation":
                 # Everything Step 4 needs (use `.get()` when reading to avoid KeyError)
                 st.session_state.pending_generation = {
                     "notes_payload": notes_payload,
+                    "meeting": (st.session_state.get("meeting") or {}).copy(),
                     "pathway": d.get("pathway", ""),
                     "level": d.get("level", ""),
                     "project": d.get("project", ""),
