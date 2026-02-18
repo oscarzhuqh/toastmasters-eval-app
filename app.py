@@ -426,6 +426,29 @@ def build_selected_criteria_text(project: str, rubric_items):
     return "\n".join(lines)
 
 
+
+def build_export_plaintext(meeting: dict, selection: dict, draft_md: str) -> str:
+    """Plaintext export used for PDF generation (keeps it simple & printable)."""
+    parts = []
+    parts.append("MEETING INFORMATION")
+    parts.append(f"Speaker: {meeting.get('speaker','')}")
+    parts.append(f"Evaluator: {meeting.get('evaluator','')}")
+    parts.append(f"Date: {meeting.get('date','')}")
+    parts.append(f"Speech Title: {meeting.get('speech_title','')}")
+    parts.append("")
+    parts.append("PATHWAYS PROJECT & OBJECTIVES")
+    parts.append(f"Pathway: {selection.get('pathway','')}")
+    parts.append(f"Level: {selection.get('level','')}")
+    parts.append(f"Project: {selection.get('project','')}")
+    parts.append(f"Speech Length: {selection.get('speech_len','')}")
+    parts.append("")
+    parts.append(strip_code_fences(draft_md or "").strip())
+    parts.append("")
+    parts.append("SIGN-OFF")
+    parts.append("Evaluator Signature: _______________________________")
+    parts.append("Date: _______________________________")
+    return "\n".join(parts)
+
 def build_export_html(
     title: str,
     meeting: dict,
@@ -462,7 +485,7 @@ def build_export_html(
             row("Speaker", meeting.get("speaker", "")),
             row("Evaluator", meeting.get("evaluator", "")),
             row("Date", meeting.get("date", "")),
-            row("Speech Title", meeting.get("title", "")),
+            row("Speech Title", meeting.get("speech_title", "")),
         ]
     )
 
@@ -521,6 +544,22 @@ def build_export_html(
   <div class="draft">
     {draft_html}
   </div>
+
+  <hr />
+  <div class="grid">
+    <div class="box">
+      <h2>Sign-off</h2>
+      <table>
+        <tr><th>Evaluator Signature</th><td style="height:28px;border-bottom:1px solid #111;"></td></tr>
+        <tr><th>Date</th><td style="height:22px;border-bottom:1px solid #111;"></td></tr>
+      </table>
+    </div>
+    <div class="box">
+      <h2>Notes</h2>
+      <div style="font-size:12px;color:#333;">(Optional) Add any final handwritten notes after printing.</div>
+    </div>
+  </div>
+
 </body>
 </html>"""
     return html_out
@@ -1031,7 +1070,8 @@ if st.session_state.page == "draft":
         )
 
     with c3:
-        pdf_bytes = make_pdf_bytes("Toastmasters Evaluation Draft", combined_md)
+        pdf_source = build_export_plaintext(meeting, selection, combined_md)
+        pdf_bytes = make_pdf_bytes("Toastmasters Evaluation Draft", pdf_source)
         if not pdf_bytes:
             st.download_button(
                 "⬇️ Download PDF",
