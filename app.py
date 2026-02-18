@@ -2,6 +2,7 @@ import time
 import re
 from pathlib import Path
 import html
+html_escape = html.escape  # alias used in export HTML builder
 from io import BytesIO
 
 import streamlit as st
