@@ -178,6 +178,37 @@ st.markdown(
 
 
 # ==================== HELPERS ====================
+def sanitize_draft_markdown(md: str) -> str:
+    """
+    Clean AI draft markdown for export:
+    - Removes fenced code blocks (```...```)
+    - Removes checklist-only sections that duplicate UI checkboxes
+    - Removes markdown checkbox lines (- [x] / - [ ])
+    """
+    if not md:
+        return ""
+
+    # Remove fenced code blocks (including ```markdown)
+    md = re.sub(r"```.*?```", "", md, flags=re.DOTALL)
+
+    # Remove any inline "Checklist:" label lines
+    md = re.sub(r"^\s*Checklist:\s*$", "", md, flags=re.M)
+
+    # Remove markdown checkbox lines
+    md = re.sub(r"^\s*[-*]?\s*\[[xX\s]\].*$", "", md, flags=re.M)
+
+    # Remove sections that are purely checklist headings (keep purpose alignment paragraph)
+    md = re.sub(
+        r"^##\s+(Evaluator Alignment Checklist|Checklist)\b.*?(?=^##\s+|\Z)",
+        "",
+        md,
+        flags=re.M | re.DOTALL,
+    )
+
+    # Tidy excessive blank lines
+    md = re.sub(r"\n{3,}", "\n\n", md).strip()
+    return md
+
 def find_logo_path():
     for p in LOGO_CANDIDATES:
         if p.exists():
@@ -454,115 +485,165 @@ def build_export_html(
     meeting: dict,
     selection: dict,
     draft_md: str,
+    *,
+    ack_review: bool = False,
 ) -> str:
-    """Create a clean, print-to-PDF-friendly HTML file."""
+    """
+    Create a clean, meeting-ready HTML export.
 
-    safe_md = strip_code_fences(draft_md)
+    Option 2 behaviour:
+    - Keep UI alignment checkboxes inside the app only (not printed in export).
+    - Export includes a short "Evaluator reviewed" note when ack_review is True.
+    """
+    safe_title = html_escape(title or "Toastmasters Evaluation Draft")
 
-    # Render checklists nicely in HTML (keep it simple and print-friendly)
-    safe_md = safe_md.replace("- [x] ", "☑ ").replace("- [ ] ", "☐ ")
+    meeting = meeting or {}
+    selection = selection or {}
 
+    def _safe(v: str) -> str:
+        return html_escape(str(v or ""))
+
+    cleaned_md = sanitize_draft_markdown(draft_md or "")
+    import markdown2
     try:
-        import markdown2  # type: ignore
-
         draft_html = markdown2.markdown(
-            safe_md,
-            extras=[
-                "fenced-code-blocks",
-                "tables",
-                "break-on-newline",
-            ],
+            cleaned_md,
+            extras=["tables", "fenced-code-blocks", "break-on-newline"],
         )
     except Exception:
-        draft_html = f"<pre style='white-space:pre-wrap'>{html.escape(safe_md)}</pre>"
+        draft_html = "<pre>" + html_escape(cleaned_md) + "</pre>"
 
-    def row(k, v):
-        v = "" if v is None else str(v)
-        return f"<tr><th>{html.escape(k)}</th><td>{html.escape(v)}</td></tr>"
+    reviewed_note = ""
+    if ack_review:
+        reviewed_note = """
+        <div class="reviewed">
+          <strong>Evaluator review:</strong> The evaluator reviewed and confirmed the AI-assisted draft and alignment indicators in-app before export.
+        </div>
+        """
 
-    meeting_rows = "".join(
-        [
-            row("Speaker", meeting.get("speaker", "")),
-            row("Evaluator", meeting.get("evaluator", "")),
-            row("Date", meeting.get("date", "")),
-            row("Speech Title", meeting.get("speech_title", "")),
-        ]
-    )
-
-    selection_rows = "".join(
-        [
-            row("Pathway", selection.get("pathway", "")),
-            row("Level", selection.get("level", "")),
-            row("Project", selection.get("project", "")),
-            row("Speech Length", selection.get("speech_len", "")),
-        ]
-    )
-
-    css = """
-    @page { size: A4; margin: 14mm; }
-    body { font-family: Arial, Helvetica, sans-serif; color: #111; }
-    h1 { margin: 0 0 6px 0; font-size: 22px; }
-    .sub { color: #666; font-size: 12px; margin-bottom: 12px; }
-    .grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 10px; }
-    .box { border: 1px solid #111; padding: 10px; border-radius: 4px; }
-    .box h2 { margin: 0 0 8px 0; font-size: 14px; letter-spacing: .2px; }
-    table { width: 100%; border-collapse: collapse; }
-    th { text-align: left; width: 120px; font-size: 12px; padding: 2px 0; }
-    td { font-size: 12px; padding: 2px 0; }
-    hr { border: 0; border-top: 1px solid #111; margin: 12px 0; }
-    .draft { border: 1px solid #111; padding: 12px; border-radius: 4px; }
-    .draft h2 { margin-top: 14px; }
-    .draft p, .draft li { font-size: 12px; line-height: 1.35; }
-    pre { background: #f6f6f6; padding: 10px; border-radius: 4px; }
-    code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; }
-    """
-
-    html_out = f"""<!doctype html>
+    html_doc = f"""<!doctype html>
 <html>
 <head>
-  <meta charset="utf-8" />
-  <title>{html.escape(title)}</title>
-  <style>{css}</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{safe_title}</title>
+  <style>
+    body {{
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 12px;
+      margin: 18px;
+      color: #111;
+    }}
+    .header {{ margin-bottom: 10px; }}
+    .header .sub {{ font-size: 11px; color: #555; margin-top: 2px; }}
+    .grid {{
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 10px;
+      margin-top: 10px;
+    }}
+    .box {{
+      border: 2px solid #111;
+      border-radius: 3px;
+      padding: 10px;
+      min-height: 80px;
+    }}
+    .box h3 {{ margin: 0 0 8px 0; font-size: 12px; }}
+    .kv {{
+      display: grid;
+      grid-template-columns: 90px 1fr;
+      row-gap: 6px;
+      column-gap: 10px;
+      font-size: 12px;
+    }}
+    .kv .k {{ font-weight: 700; }}
+    .draft {{
+      border: 2px solid #111;
+      border-radius: 3px;
+      padding: 12px;
+      margin-top: 10px;
+      background: #f4f4f4;
+    }}
+    .draft h1, .draft h2, .draft h3 {{ margin: 10px 0 6px 0; }}
+    .draft p {{ margin: 6px 0; line-height: 1.35; }}
+    .draft ul, .draft ol {{ margin: 6px 0 6px 18px; padding: 0; }}
+    .reviewed {{
+      margin-top: 10px;
+      padding: 10px;
+      border: 2px solid #111;
+      border-radius: 3px;
+      background: #fff;
+    }}
+    .footer-grid {{
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 10px;
+      margin-top: 10px;
+    }}
+    .line {{
+      border-bottom: 1px solid #111;
+      height: 14px;
+      margin-top: 8px;
+    }}
+    .muted {{ color: #555; font-size: 11px; }}
+    @media print {{
+      body {{ margin: 10mm; }}
+      .draft {{ background: #fff; }}
+    }}
+  </style>
 </head>
 <body>
-  <h1>{html.escape(title)}</h1>
-  <div class="sub">Generated by Toastmasters Evaluation Assistant (T.E.A.)</div>
+  <div class="header">
+    <div style="font-size:18px;font-weight:700;">{safe_title}</div>
+    <div class="sub">Generated by Toastmasters Evaluation Assistant (T.E.A.)</div>
+  </div>
 
   <div class="grid">
     <div class="box">
-      <h2>Meeting Details</h2>
-      <table>{meeting_rows}</table>
+      <h3>Meeting Details</h3>
+      <div class="kv">
+        <div class="k">Speaker</div><div>{_safe(meeting.get("speaker"))}</div>
+        <div class="k">Evaluator</div><div>{_safe(meeting.get("evaluator"))}</div>
+        <div class="k">Date</div><div>{_safe(meeting.get("date"))}</div>
+        <div class="k">Speech Title</div><div>{_safe(meeting.get("speech_title"))}</div>
+      </div>
     </div>
+
     <div class="box">
-      <h2>Project Selection</h2>
-      <table>{selection_rows}</table>
+      <h3>Project Selection</h3>
+      <div class="kv">
+        <div class="k">Pathway</div><div>{_safe(selection.get("pathway"))}</div>
+        <div class="k">Level</div><div>{_safe(selection.get("level"))}</div>
+        <div class="k">Project</div><div>{_safe(selection.get("project"))}</div>
+        <div class="k">Speech Length</div><div>{_safe(selection.get("speech_len"))}</div>
+      </div>
     </div>
   </div>
-
-  <hr />
 
   <div class="draft">
     {draft_html}
   </div>
 
-  <hr />
-  <div class="grid">
+  {reviewed_note}
+
+  <div class="footer-grid">
     <div class="box">
-      <h2>Sign-off</h2>
-      <table>
-        <tr><th>Evaluator Signature</th><td style="height:28px;border-bottom:1px solid #111;"></td></tr>
-        <tr><th>Date</th><td style="height:22px;border-bottom:1px solid #111;"></td></tr>
-      </table>
+      <h3>Sign-off</h3>
+      <div class="kv">
+        <div class="k">Evaluator Signature</div><div class="line"></div>
+        <div class="k">Date</div><div class="line"></div>
+      </div>
     </div>
     <div class="box">
-      <h2>Notes</h2>
-      <div style="font-size:12px;color:#333;">(Optional) Add any final handwritten notes after printing.</div>
+      <h3>Notes</h3>
+      <div class="muted">(Optional) Add any final handwritten notes after printing.</div>
+      <div style="height:54px;"></div>
     </div>
   </div>
-
 </body>
 </html>"""
-    return html_out
+    return html_doc
+
 def make_pdf_bytes(title: str, body_text: str) -> bytes:
     """Create a simple A4 PDF (plain text) for download."""
     if canvas is None or A4 is None or cm is None:
@@ -1057,7 +1138,7 @@ if st.session_state.page == "draft":
         html_out = build_export_html(
             title="Toastmasters Evaluation Draft",
             meeting=meeting,
-            selection=selection,
+            selection=selection,ack_review=ack_review,
             draft_md=combined_md,
         )
         st.download_button(
