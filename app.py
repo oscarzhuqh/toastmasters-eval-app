@@ -2,13 +2,138 @@ import time
 import re
 from pathlib import Path
 import html
-
-def html_escape(s: str) -> str:
-    return html.escape(s, quote=True)
-
 from io import BytesIO
 
 import streamlit as st
+
+
+def _split_md_sections(md_text: str) -> dict:
+    """Split draft markdown into named sections based on '## Heading'."""
+    md = (md_text or "").strip()
+    if not md:
+        return {}
+
+    sections: dict[str, str] = {}
+    current = None
+    buf: list[str] = []
+
+    def commit():
+        nonlocal current, buf
+        if current is not None:
+            sections[current] = "\n".join(buf).strip()
+        buf = []
+
+    for ln in md.splitlines():
+        m = re.match(r"^\s*##\s+(.+?)\s*$", ln)
+        if m:
+            commit()
+            current = m.group(1).strip()
+            # Normalize common headings so the export/parser remains robust
+            if current.lower().startswith("purpose alignment"):
+                current = "Purpose Alignment"
+            elif current.lower().startswith("rubric snapshot"):
+                current = "Rubric Snapshot"
+
+            continue
+        buf.append(ln)
+
+    commit()
+    return sections
+
+
+def _extract_alignment_checks(md_text: str) -> tuple[str, dict[str, bool], list[str], str]:
+    """Extract Purpose Alignment summary + checklist + reasons + evidence block.
+
+    Anti-hallucination enforcement:
+    - If Evidence lines are missing, force all checklist items to False.
+    - If any Evidence line contains 'Insufficient evidence', force Purpose + Level Focus unchecked.
+    - If evidence has no rubric/criteria hint, uncheck 'Feedback linked to evaluation criteria'.
+    """
+    checks = {
+        "Purpose clearly addressed": False,
+        "Level focus demonstrated": False,
+        "Feedback linked to evaluation criteria": False,
+        "Balanced commendations + improvements": False,
+        "Actionable next step provided": False,
+    }
+    reasons: list[str] = []
+    summary = ""
+    evidence_block = ""
+
+    sections = _split_md_sections(md_text)
+    block = sections.get("Purpose Alignment", "") or sections.get("Purpose alignment", "")
+    block = (block or "").strip()
+    if not block:
+        return summary, checks, reasons, evidence_block
+
+    lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
+
+    # Summary: first 1–2 non-checklist, non-evidence lines
+    collected = []
+    for ln in lines:
+        if re.match(r"^-\s*\[(x| )\]\s+", ln, flags=re.IGNORECASE):
+            break
+        if ln.lower().startswith("evidence:"):
+            continue
+        if ln.startswith("-") and not ln.lower().startswith("- alignment claim"):
+            continue
+        collected.append(ln)
+        if len(collected) >= 2:
+            break
+    summary = " ".join(collected).strip()
+
+    # Checklist (if present)
+    for ln in lines:
+        mm = re.match(r"^-\s*\[(x| )\]\s*(.+?)\s*$", ln, flags=re.IGNORECASE)
+        if not mm:
+            continue
+        checked = mm.group(1).lower() == "x"
+        label = mm.group(2).strip().lower()
+        for k in list(checks.keys()):
+            kk = k.lower()
+            if kk in label or label in kk:
+                checks[k] = checked
+
+    # Reasons: bullets (best effort)
+    for ln in lines:
+        if re.match(r"^-\s*\[(x| )\]\s+", ln, flags=re.IGNORECASE):
+            continue
+        if ln.startswith("-") and not ln.lower().startswith("- alignment claim"):
+            reasons.append(ln.lstrip("-").strip())
+    reasons = [r for r in reasons if r and len(r) <= 180][:3]
+
+    # Evidence lines
+    evidence_lines = [ln for ln in lines if ln.lower().startswith("evidence:")]
+    if not evidence_lines:
+        for k in checks:
+            checks[k] = False
+        evidence_block = "Insufficient evidence: no Evidence lines were provided in the draft."
+        return summary, checks, reasons, evidence_block
+
+    insufficient = any("insufficient evidence" in ln.lower() for ln in evidence_lines)
+    if insufficient:
+        checks["Purpose clearly addressed"] = False
+        checks["Level focus demonstrated"] = False
+
+    has_rubric_hint = any(("rubric" in ln.lower() or "/5" in ln or "criteria" in ln.lower()) for ln in evidence_lines)
+    if not has_rubric_hint:
+        checks["Feedback linked to evaluation criteria"] = False
+
+    # Compact evidence block for the form (include claim+evidence lines, exclude checklist)
+    ev_lines = []
+    for ln in lines:
+        if re.match(r"^-\s*\[(x| )\]\s+", ln, flags=re.IGNORECASE):
+            continue
+        # Keep only alignment claim/evidence/why bullets/headings
+        if ln.lower().startswith("- alignment claim") or ln.lower().startswith("evidence:") or ln.lower().startswith("### "):
+            ev_lines.append(ln)
+        elif ln.startswith("-") and len(ev_lines) > 0:
+            # Likely "Why" bullets
+            ev_lines.append(ln)
+
+    evidence_block = "\n".join(ev_lines).strip()
+    return summary, checks, reasons, evidence_block
+
 
 # --- Optional PDF export (ReportLab) ---
 try:
@@ -171,14 +296,30 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-      textarea { background-color: #EAF0FF !important; }
-      div[data-testid="stVerticalBlock"] > div { gap: 0.55rem; }
+      /* === Mobile-safe input visibility fix === */
+      textarea, input {
+        background-color: #EAF0FF !important;
+        color: #000000 !important;
+      }
+
+      textarea::placeholder, input::placeholder {
+        color: #555555 !important;
+      }
+
+      div[data-testid="stVerticalBlock"] > div {
+        gap: 0.55rem;
+      }
+
       /* Make the central project-details box feel less wide */
-      .tea-narrow { max-width: 680px; margin: 0 auto; }
+      .tea-narrow {
+        max-width: 680px;
+        margin: 0 auto;
+      }
     </style>
     """,
     unsafe_allow_html=True,
 )
+
 
 
 # ==================== HELPERS ====================
@@ -299,10 +440,7 @@ def render_rubric_table(rubric_def):
       [Criteria] | [5 4 3 2 1] | [Comment box]
     Default rating = 3.
     """
-    rubric_items = st.session_state.get('rubric_items', [])
-    st.session_state.setdefault('rubric_items', rubric_items)
-    # Always keep a local alias for safety
-    rubric_items = st.session_state.get('rubric_items', [])
+    rubric_items = []
 
     with st.container(border=True):
         h1, h2, h3 = st.columns([2.2, 3.2, 3.6], vertical_alignment="center")
@@ -400,123 +538,315 @@ def build_selected_criteria_text(project: str, rubric_items):
     return "\n".join(lines)
 
 
+
+def _ensure_purpose_alignment_evidence(draft_md: str, purpose: str, level_focus: str, rubric_snapshot: str) -> str:
+    """If Purpose Alignment section lacks 'Evidence:' lines, inject conservative Evidence lines.
+
+    Evidence is derived only from:
+    - Project purpose / level focus (from selection metadata)
+    - Rubric Snapshot lines (if present in the draft)
+    """
+    md = (draft_md or "").strip()
+    if not md:
+        return md
+
+    m = re.search(r"(?mi)^\s*##\s+Purpose\s+Alignment\b.*$", md)
+    if not m:
+        return md
+
+    start = m.end()
+    rest = md[start:]
+    end_match = re.search(r"(?mi)^\s*##\s+\S", rest)
+    section = rest[: end_match.start()] if end_match else rest
+    after = rest[end_match.start():] if end_match else ""
+
+    if re.search(r"(?mi)^\s*Evidence\s*:", section):
+        return md
+
+    rs_lines = [ln.strip("- ").strip() for ln in (rubric_snapshot or "").splitlines() if "/5" in ln][:2]
+    rs_hint = "; ".join(rs_lines) if rs_lines else "rubric ratings/comments provided"
+    purpose_hint = (purpose or "").strip()
+    level_hint = (level_focus or "").strip()
+
+    ev_parts = []
+    if purpose_hint:
+        ev_parts.append(f'Project purpose: "{purpose_hint}"')
+    if level_hint:
+        ev_parts.append(f'Level focus: "{level_hint}"')
+    ev_parts.append(f"Rubric snapshot: {rs_hint}")
+
+    evidence_sentence = "Evidence: Based on " + "; ".join(ev_parts) + "."
+
+    lines = section.splitlines()
+    new_lines = []
+    inserted_any = False
+    for ln in lines:
+        new_lines.append(ln)
+        if re.match(r"(?i)^\s*-\s*Alignment\s+claim\s*:", ln):
+            new_lines.append("  " + evidence_sentence)
+            inserted_any = True
+
+    if not inserted_any:
+        new_lines.insert(0, evidence_sentence)
+
+    new_section = "\n".join(new_lines).rstrip() + "\n"
+    rebuilt = md[:start] + new_section + after
+    return rebuilt
+
+
+
+def _strip_md_fences(md_text: str) -> str:
+    """Remove ```markdown / ``` fences if the whole draft is wrapped (appendix cleanliness)."""
+    md = (md_text or "").strip()
+    if not md:
+        return md
+    md = re.sub(r'^```\s*(markdown|md)?\s*\n', '', md, flags=re.IGNORECASE)
+    md = re.sub(r'\n```\s*$', '', md)
+    return md
+
+
 def build_export_html(
     title: str,
     meeting: dict,
     selection: dict,
     draft_md: str,
-    rubric_items=None,
-    total_score=None,
-    max_score=None,
+    include_appendix: bool = True,
 ) -> str:
-    """Create a clean, print-to-PDF-friendly HTML file."""
+    """Create a meeting-ready, print-to-PDF-friendly HTML file (Toastmasters-form style)."""
 
-    # Very small markdown -> HTML (safe fallback)
+    # Ensure Purpose Alignment includes Evidence lines (anti-hallucination auditability)
+    draft_md = _ensure_purpose_alignment_evidence(
+        draft_md=draft_md,
+        purpose=str(selection.get('purpose') or ''),
+        level_focus=str(selection.get('level_focus') or ''),
+        rubric_snapshot=str(_split_md_sections(draft_md or '').get('Rubric Snapshot', '')).strip(),
+    )
+
+
+    # Markdown -> HTML (appendix)
     try:
         import markdown as md  # type: ignore
         draft_html = md.markdown(draft_md or "", extensions=["fenced_code", "tables"])
     except Exception:
         draft_html = f"<pre style='white-space:pre-wrap'>{html.escape(draft_md or '')}</pre>"
 
-    # --- Competency summary for export (based on rubric ratings) ---
-    competency_section = ""
-    try:
-        if rubric_items and (total_score is not None) and (max_score is not None):
-            band, label = overall_band(int(total_score))
-            strengths = [it for it in rubric_items if int(it.get("rating", 0)) >= 4]
-            improvements = [it for it in rubric_items if int(it.get("rating", 0)) <= 3]
-
-            def _li(item):
-                crit = html_escape(str(item.get("criterion", "")))
-                rating = html_escape(str(item.get("rating", "")))
-                comment = (item.get("comment") or "").strip() or "No comment"
-                return f"<li><b>{crit}</b> ({rating}/5) — {html_escape(comment)}</li>"
-
-            strengths_html = "".join([_li(it) for it in strengths]) or "<li>—</li>"
-            improvements_html = "".join([_li(it) for it in improvements]) or "<li>—</li>"
-
-            competency_section = f"""
-<hr/>
-<h2>Speaker’s Competency Summary</h2>
-<div class="box">
-  <div><b>Total Score:</b> {int(total_score)} / {int(max_score)}</div>
-  <div style="margin-top:6px;"><b>Overall Result:</b> {html_escape(band)} ({html_escape(label)})</div>
-  <div style="margin-top:12px; display:flex; gap:24px;">
-    <div style="flex:1;">
-      <h3>Strengths (4–5)</h3>
-      <ul>{strengths_html}</ul>
-    </div>
-    <div style="flex:1;">
-      <h3>Areas for Improvement (1–3)</h3>
-      <ul>{improvements_html}</ul>
-    </div>
+    appendix_section = ""
+    if include_appendix:
+        appendix_section = f"""
+  <div class="section">
+    <h2>Appendix: Full Draft (for submission/record)</h2>
+    {draft_html}
   </div>
-</div>
-"""
-    except Exception:
-        competency_section = ""
+        """
 
+    sections = _split_md_sections(draft_md or "")
+    opening = sections.get("Opening", "").strip()
+    strengths = sections.get("Strengths", "").strip()
+    rubric_snapshot = sections.get("Rubric Snapshot", "").strip()
+    recs = sections.get("Recommendations", "").strip()
+    challenge = sections.get("One Challenge", "").strip()
+
+    align_summary, align_checks, align_reasons, align_evidence = _extract_alignment_checks(draft_md or "")
+
+    def esc(x):
+        return html.escape("" if x is None else str(x))
 
     def row(k, v):
-        v = "" if v is None else str(v)
-        return f"<tr><th>{html.escape(k)}</th><td>{html.escape(v)}</td></tr>"
+        return f"<tr><th>{esc(k)}</th><td>{esc(v)}</td></tr>"
+
+    def get_first(d: dict, keys: list[str], default: str = "") -> str:
+        for k in keys:
+            v = d.get(k)
+            if v is None:
+                continue
+            s = str(v).strip()
+            if s:
+                return s
+        return default
 
     meeting_rows = "".join(
         [
-            row("Speaker", meeting.get("speaker_name")),
-            row("Evaluator", meeting.get("evaluator_name")),
-            row("Date", meeting.get("meeting_date")),
-            row("Speech Title", meeting.get("speech_title")),
+            row("Speaker", get_first(meeting, ["speaker_name","speaker","speakerName","speaker_name_input","speaker_input"])),
+            row("Evaluator", get_first(meeting, ["evaluator_name","evaluator","evaluatorName","evaluator_name_input","evaluator_input"])),
+            row("Date", get_first(meeting, ["meeting_date","date","meetingDate","session_date"])),
+            row("Speech Title", get_first(meeting, ["speech_title","title","speechTitle"])),
         ]
     )
     selection_rows = "".join(
         [
-            row("Pathway", selection.get("pathway")),
-            row("Level", selection.get("level")),
-            row("Project", selection.get("project")),
-            row("Speech Length", selection.get("speech_len")),
+            row("Pathway", selection.get("pathway") or ""),
+            row("Level", selection.get("level") or ""),
+            row("Project", selection.get("project") or ""),
+            row("Speech Length", selection.get("speech_len") or ""),
+            row("Project Purpose", get_first(selection, ["purpose","project_purpose","projectPurpose","purpose_text","project_purpose_text"])),
+            row("Level Focus", get_first(selection, ["level_focus","levelFocus","focus","level_focus_text","focus_text"])),
         ]
     )
 
+    def box_text(text: str) -> str:
+        text = (text or "").strip()
+        if not text:
+            return "<div class='lines'></div>"
+        try:
+            import markdown as md  # type: ignore
+            return md.markdown(text, extensions=["fenced_code"])
+        except Exception:
+            return f"<pre style='white-space:pre-wrap; margin:0'>{esc(text)}</pre>"
+
+    opening_html = box_text(opening)
+    strengths_html = box_text(strengths)
+    rubric_snapshot_html = box_text(rubric_snapshot)
+    recs_html = box_text(recs)
+    challenge_html = box_text(challenge)
+    align_evidence = (align_evidence or "")
+    align_evidence = align_evidence.replace(
+        "### Alignment Checklist (Evidence-Based)",
+        "### Alignment Checklist (Evidence-Based)\nChecked items are derived from the evidence listed above."
+    )
+        # Clean alignment evidence for meeting view (no markdown leakage)
+    raw = (align_evidence or "").strip()
+
+    # Extract claims/evidence even if multiple items are on one long line
+    pieces: list[str] = []
+    # Prefer Evidence sentences first (most concrete), else claims
+    evidence_hits = re.findall(r"(?i)\bEvidence\s*:\s*([^#\n]+)", raw)
+    claim_hits = re.findall(r"(?i)\bAlignment\s+claim\s*:\s*([^#\n]+)", raw)
+
+    for x in evidence_hits:
+        t = re.sub(r"\s+", " ", x).strip(" -•\t")
+        if t:
+            pieces.append(t)
+
+    if not pieces:
+        for x in claim_hits:
+            t = re.sub(r"\s+", " ", x).strip(" -•\t")
+            if t:
+                pieces.append(t)
+
+    # Dedupe while preserving order
+    seen: set[str] = set()
+    cleaned: list[str] = []
+    for p in pieces:
+        key = p.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(p)
+        if len(cleaned) >= 3:
+            break
+
+    if not cleaned:
+        cleaned = ["See appendix for evidence-backed alignment details."]
+
+    bullets = "".join([f"<li>{esc(x)}</li>" for x in cleaned])
+    evidence_html = f"<ul class='evidence'>{bullets}</ul>"
+
+    def checkbox_line(label: str, checked: bool) -> str:
+        box = "☑" if checked else "☐"
+        return f"<div class='chk'><span class='box'>{box}</span><span>{esc(label)}</span></div>"
+
+    checklist_html = "".join(checkbox_line(k, v) for k, v in align_checks.items())
+
+    reasons_html = ""
+    if align_reasons:
+        reasons_html = "<ul class='tight'>" + "".join(f"<li>{esc(r)}</li>" for r in align_reasons) + "</ul>"
+
+    sig_table = """
+    <table class="sig">
+      <tr><th>Evaluator Signature</th><td class="sigline"></td></tr>
+      <tr><th>Date</th><td class="sigline"></td></tr>
+    </table>
+    """
+
     return f"""<!doctype html>
-<html lang=\"en\">
+<html lang="en">
 <head>
-  <meta charset=\"utf-8\" />
-  <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\" />
-  <title>{html.escape(title)}</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>{esc(title)}</title>
   <style>
-    body {{ font-family: -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif; margin: 32px; color:#111; }}
-    h1 {{ margin: 0 0 6px 0; font-size: 28px; }}
-    .subtitle {{ color:#555; margin-bottom: 18px; }}
-    .grid {{ display:grid; grid-template-columns: 1fr 1fr; gap: 18px; margin: 18px 0 22px 0; }}
-    .card {{ border:1px solid #e6e6e6; border-radius: 12px; padding: 14px 16px; }}
-    table {{ width:100%; border-collapse: collapse; }}
-    th {{ text-align:left; padding:6px 0; width: 32%; color:#444; font-weight:600; vertical-align: top; }}
-    td {{ padding:6px 0; }}
-    hr {{ border:0; border-top:1px solid #eee; margin: 20px 0; }}
-    .draft {{ line-height: 1.55; }}
-    @media print {{ body {{ margin: 16mm; }} .card {{ break-inside: avoid; }} }}
+    @page {{ size: A4; margin: 16mm; }}
+    body {{ font-family: Arial, Helvetica, sans-serif; font-size: 11pt; color:#000; }}
+    h1 {{ font-size: 16pt; margin: 0 0 4mm 0; text-transform: uppercase; letter-spacing: 0.3px; }}
+    .sub {{ font-size: 10pt; margin: 0 0 6mm 0; }}
+    .section {{ border: 1px solid #000; padding: 8px 10px; margin-bottom: 4mm; break-inside: avoid; }}
+    .section h2 {{ font-size: 11pt; margin: 0 0 2mm 0; text-transform: uppercase; letter-spacing: 0.2px; }}
+    table.meta {{ width: 100%; border-collapse: collapse; font-size: 10.5pt; }}
+    table.meta th {{ text-align: left; padding: 2mm 2mm 2mm 0; width: 28%; vertical-align: top; font-weight: bold; }}
+    table.meta td {{ padding: 2mm 0; vertical-align: top; }}
+    .two-col {{ display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; }}
+    .lines {{ height: 44mm; background-image: linear-gradient(to bottom, transparent 0, transparent 19px, #d0d0d0 20px);
+             background-size: 100% 20px; background-repeat: repeat-y; }}
+    .tight ul, ul.tight {{ margin: 0; padding-left: 18px; }}
+    .chk {{ display:flex; align-items:flex-start; gap:6px; margin:1.2mm 0; font-size:10.5pt; }}
+    .box {{ width:16px; display:inline-block; }}
+    .sig {{ width:100%; border-collapse: collapse; font-size:10.5pt; }}
+    .sig th {{ text-align:left; width:28%; padding:2mm 2mm 2mm 0; font-weight:bold; }}
+    .sigline {{ border-bottom: 1px solid #000; height: 8mm; }}
+    .footer-note {{ font-size: 9.5pt; margin-top: 2mm; }}
+    @media print {{ a {{ color:#000; text-decoration:none; }} }}
   </style>
 </head>
 <body>
-  <h1>{html.escape(title)}</h1>
-  <div class=\"subtitle\">Generated by Toastmasters Evaluation Assistant (T.E.A.)</div>
+  <h1>{esc(title)}</h1>
+  <div class="sub">Toastmasters Evaluation Assistant (T.E.A.) — Meeting-ready export</div>
 
-  <div class=\"grid\">
-    <div class=\"card\">
-      <h2 style=\"margin:0 0 8px 0; font-size:18px\">Meeting Details</h2>
-      <table>{meeting_rows}</table>
+  <div class="section">
+    <h2>Meeting Information</h2>
+    <table class="meta">{meeting_rows}</table>
+  </div>
+
+  <div class="section">
+    <h2>Pathways Project & Objectives</h2>
+    <table class="meta">{selection_rows}</table>
+  </div>
+
+  <div class="section">
+    <h2>Rubric Snapshot (1–5)</h2>
+    {rubric_snapshot_html}
+  </div>
+
+  <div class="section">
+    <h2>Opening</h2>
+    {opening_html}
+  </div>
+
+  <div class="two-col">
+    <div class="section">
+      <h2>What the Speaker Did Well</h2>
+      {strengths_html}
     </div>
-    <div class=\"card\">
-      <h2 style=\"margin:0 0 8px 0; font-size:18px\">Project Selection</h2>
-      <table>{selection_rows}</table>
+    <div class="section">
+      <h2>Recommendations for Improvement</h2>
+      {recs_html}
     </div>
   </div>
 
-  <hr />
-  <h2 style=\"margin:0 0 10px 0\">Evaluation Draft</h2>
-  <div class=\"draft\">{draft_html}</div>
-{competency_section}
+  <div class="section">
+    <h2>One Challenge (Action Step)</h2>
+    {challenge_html}
+  </div>
+
+  <div class="section">
+    <h2>Evaluator Alignment (Evidence)</h2>
+    <div class="footer-note">{esc(align_summary) if align_summary else ""}</div>
+    {evidence_html}
+  </div>
+
+  <div class="section">
+    <h2>Evaluator Alignment Checklist</h2>
+    {checklist_html}
+    {reasons_html}
+  </div>
+
+  <div class="section">
+    <h2>Sign-off</h2>
+    {sig_table}
+  </div>
+
+  <div class="footer-note">Tip: For a clean PDF, Print → More settings → uncheck “Headers and footers”.</div>
+
+  {appendix_section}
 </body>
 </html>"""
 
@@ -574,6 +904,42 @@ def make_pdf_bytes(title: str, body_text: str) -> bytes:
 
     c.save()
     return buf.getvalue()
+
+
+
+def _apply_alignment_checks_to_md(md_text: str, checks: dict[str, bool]) -> str:
+    """Apply (human-confirmed) checklist states into the Purpose Alignment section of the markdown draft."""
+    md = (md_text or "")
+    m = re.search(r"(?mi)^\s*##\s+Purpose\s+Alignment\b.*$", md)
+    if not m:
+        return md
+
+    start = m.end()
+    rest = md[start:]
+    end_match = re.search(r"(?mi)^\s*##\s+\S", rest)
+    section = rest[: end_match.start()] if end_match else rest
+    after = rest[end_match.start():] if end_match else ""
+
+    lines = section.splitlines()
+
+    def norm_label(s: str) -> str:
+        return re.sub(r"\s+", " ", s.strip().lower())
+
+    desired = {norm_label(k): bool(v) for k, v in (checks or {}).items()}
+
+    new_lines = []
+    for ln in lines:
+        mm = re.match(r"(?i)^\s*-\s*\[(x| )\]\s*(.+?)\s*$", ln)
+        if mm:
+            label_txt = mm.group(2).strip()
+            key = norm_label(label_txt)
+            if key in desired:
+                mark = "x" if desired[key] else " "
+                new_lines.append(f"- [{mark}] {label_txt}")
+                continue
+        new_lines.append(ln)
+
+    return md[:start] + "\n".join(new_lines) + after
 
 
 def extract_purpose_alignment(md: str) -> tuple[str, dict[str, bool]]:
@@ -838,15 +1204,14 @@ if st.session_state.page == "draft_loading":
         "level": pending.get("level"),
         "project": pending.get("project"),
         "speech_len": pending.get("speech_len"),
+        "purpose": pending.get("purpose"),
+        "level_focus": pending.get("level_focus"),
     }
     st.session_state.draft_html = build_export_html(
         title="Toastmasters Evaluation Draft",
         meeting=meeting,
         selection=selection,
         draft_md=output,
-        rubric_items=st.session_state.get('rubric_items', []),
-        total_score=total_score,
-        max_score=max_score,
     )
 
     st.session_state.page = "draft"
@@ -868,12 +1233,30 @@ if st.session_state.page == "draft":
     )
 
     # Purpose-alignment indicator (for report screenshots)
-    align_summary, align_checks = extract_purpose_alignment(edited)
-    with st.expander("Purpose alignment indicator (auto)", expanded=False):
-        if align_summary:
-            st.caption(align_summary)
-        for label, checked in align_checks.items():
-            st.checkbox(label, value=checked, disabled=True)
+    align_align_summary, align_checks, _align_reasons, align_evidence = _extract_alignment_checks(edited)
+
+    with st.expander("Purpose alignment indicator (AI-suggested)", expanded=False):
+        st.caption("AI suggests these indicators from the evidence. Please review and adjust before exporting.")
+        if align_evidence:
+            align_evidence = (align_evidence or "")
+            align_evidence = align_evidence.replace("### Alignment Checklist (Evidence-Based)", "### Alignment Checklist (Evidence-Based)")
+            align_evidence = align_evidence.replace("Alignment Checklist (Evidence-Based)", "Alignment Checklist (Evidence-Based)")
+            st.text_area("Evidence (from draft)", value=align_evidence, height=240, disabled=False)
+
+        st.markdown("**Indicators (editable):**")
+        if "align_overrides" not in st.session_state:
+            st.session_state["align_overrides"] = dict(align_checks)
+
+        editable_checks = {}
+        for label, suggested in align_checks.items():
+            key = f"align_chk_{re.sub(r'[^a-zA-Z0-9]+', '_', label.lower()).strip('_')}"
+            current = st.session_state["align_overrides"].get(label, suggested)
+            val = st.checkbox(label, value=bool(current), key=key)
+            editable_checks[label] = bool(val)
+
+        st.session_state["align_overrides"] = dict(editable_checks)
+
+    edited_for_export = _apply_alignment_checks_to_md(edited, st.session_state.get("align_overrides", align_checks))
 
     # Build filenames
     ts = time.strftime("%Y%m%d_%H%M%S")
@@ -883,32 +1266,38 @@ if st.session_state.page == "draft":
 
     st.markdown("---")
     st.subheader("Export")
+    st.caption("Please confirm before exporting the final report.")
+    export_confirmed = st.checkbox("I have reviewed and confirm the alignment indicators for export.", value=False)
+
     c1, c2, c3 = st.columns(3)
     with c1:
         st.download_button(
             "⬇️ Download Markdown",
-            data=edited.encode("utf-8"),
+            data=edited_for_export.encode("utf-8"),
             file_name=md_name,
             mime="text/markdown",
             use_container_width=True,
         )
     with c2:
         # Rebuild HTML using the edited version (for PDF-print friendly output)
-        meeting = (st.session_state.get("pending_generation") or {}).get("meeting", {})
+        meeting = (st.session_state.get("pending_generation") or {}).get("meeting") or st.session_state.get("meeting", {})
         selection = {
             "pathway": (st.session_state.get("pending_generation") or {}).get("pathway"),
             "level": (st.session_state.get("pending_generation") or {}).get("level"),
             "project": (st.session_state.get("pending_generation") or {}).get("project"),
             "speech_len": (st.session_state.get("pending_generation") or {}).get("speech_len"),
+            "purpose": (st.session_state.get("pending_generation") or {}).get("purpose"),
+            "level_focus": (st.session_state.get("pending_generation") or {}).get("level_focus"),
         }
         html_out = build_export_html(
             title="Toastmasters Evaluation Draft",
             meeting=meeting,
             selection=selection,
-            draft_md=edited,
+            draft_md=edited_for_export,
         )
         st.download_button(
             "⬇️ Download HTML (print to PDF)",
+            disabled=not export_confirmed,
             data=html_out.encode("utf-8"),
             file_name=html_name,
             mime="text/html",
@@ -919,16 +1308,17 @@ if st.session_state.page == "draft":
         if not pdf_bytes:
             st.download_button(
                 "⬇️ Download PDF",
+                disabled=not export_confirmed,
                 data=b"",
                 file_name=pdf_name,
                 mime="application/pdf",
-                disabled=True,
                 use_container_width=True,
             )
             st.caption("PDF export needs ReportLab (reportlab>=4.0).")
         else:
             st.download_button(
                 "⬇️ Download PDF",
+                disabled=not export_confirmed,
                 data=pdf_bytes,
                 file_name=pdf_name,
                 mime="application/pdf",
@@ -1055,16 +1445,9 @@ if st.session_state.page == "evaluation":
 
     rubric_items = render_rubric_table(RUBRIC_DEF)
 
-    st.session_state['rubric_items'] = rubric_items
     # ✅ Total score + legend
     total_score = compute_total_score(rubric_items)
     max_score = len(rubric_items) * 5
-
-    # Persist rubric for export
-    st.session_state.rubric_items = rubric_items
-    st.session_state.total_score = total_score
-    st.session_state.max_score = max_score
-
 
     st.subheader("Speaker's Competency Total Accumulated Score")
     cA, cB = st.columns([1.2, 2.8], vertical_alignment="center")
@@ -1177,6 +1560,7 @@ To challenge yourself:
                 # Everything Step 4 needs (use `.get()` when reading to avoid KeyError)
                 st.session_state.pending_generation = {
                     "notes_payload": notes_payload,
+                    "meeting": dict(st.session_state.get("meeting", {})),
                     "pathway": d.get("pathway", ""),
                     "level": d.get("level", ""),
                     "project": d.get("project", ""),
@@ -1273,7 +1657,7 @@ if st.session_state.page == "draft":
         title="Toastmasters Evaluation Draft",
         meeting=meeting,
         selection=selection,
-        draft_md=edited,
+        draft_md=edited_for_export,
     )
 
     ts = time.strftime("%Y%m%d_%H%M%S")
@@ -1283,7 +1667,7 @@ if st.session_state.page == "draft":
     with c1:
         st.download_button(
             "Download Draft (.md)",
-            data=edited.encode("utf-8"),
+            data=edited_for_export.encode("utf-8"),
             file_name=f"{base}.md",
             mime="text/markdown",
             use_container_width=True,
@@ -1299,7 +1683,7 @@ if st.session_state.page == "draft":
     with c3:
         st.download_button(
             "Download Draft (.txt)",
-            data=edited.encode("utf-8"),
+            data=edited_for_export.encode("utf-8"),
             file_name=f"{base}.txt",
             mime="text/plain",
             use_container_width=True,
@@ -1332,5 +1716,3 @@ if st.session_state.page == "draft":
                     del st.session_state[k]
             st.session_state.page = "select"
             st.rerun()
-
-
